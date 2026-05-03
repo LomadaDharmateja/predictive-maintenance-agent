@@ -3,15 +3,15 @@ from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
 from langchain_pinecone import PineconeVectorStore
 
 def get_vectorstore():
-    """Connects to the Pinecone cloud database."""
+    """Connects to the Pinecone cloud database using the Inference API."""
     
-    # 1. Use the API for lightweight queries (0MB RAM!)
+    # 1. Use the API for lightweight queries (Uses Cloud RAM, not yours!)
     embeddings = HuggingFaceInferenceAPIEmbeddings(
         api_key=os.getenv("HUGGINGFACE_API_KEY"),
-        model_name="sentence-transformers/all-MiniLM-L6-v2"  # Must match local model
+        model_name="sentence-transformers/all-MiniLM-L6-v2" 
     )
     
-    # 2. Connect to the Pinecone database you already filled
+    # 2. Connect to the existing Pinecone index
     vectorstore = PineconeVectorStore(
         index_name="vulcan-manuals",
         embedding=embeddings,
@@ -19,3 +19,11 @@ def get_vectorstore():
     )
     
     return vectorstore
+
+def search_manual(query):
+    """Searches the indexed PDF manual for technical repair steps."""
+    vectorstore = get_vectorstore()
+    # Retrieve the top 3 most relevant paragraphs
+    results = vectorstore.similarity_search(query, k=3)
+    context = "\n".join([res.page_content for res in results])
+    return context
