@@ -7,18 +7,16 @@ from langchain_classic.agents import AgentExecutor, create_tool_calling_agent
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_classic.memory import ConversationBufferMemory
 
-# Import your clean tools
 from tools.data_tools import (
     analyze_sensor_trends, 
     check_maintenance_sensors, 
-    check_market_prices, 
     consult_technical_manual, 
     run_sql_query, 
     get_market_news, 
     predict_failure,
-    get_failed_machines,
-    get_commodity_price,
-    get_supplier_info   
+    get_failed_machines,           # Matching new tool
+    get_supplier_info,             # Matching new tool
+    get_internal_commodity_prices  # Matching new tool
 )
 
 load_dotenv()
@@ -47,14 +45,13 @@ class IndustrialAI:
         self.tools = [
             analyze_sensor_trends, 
             check_maintenance_sensors, 
-            check_market_prices, 
             consult_technical_manual, 
             run_sql_query, 
-            get_market_news, 
+            get_market_news,                # Outside World (Tavily)
             predict_failure,
-            get_failed_machines,
-            get_supplier_info,
-            get_commodity_price
+            get_failed_machines,            # Internal Data
+            get_supplier_info,              # Internal Data
+            get_internal_commodity_prices   # Internal Data[cite: 4]
         ]
         # Unified System Persona
         self.prompt = ChatPromptTemplate.from_messages([

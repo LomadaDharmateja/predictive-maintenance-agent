@@ -28,38 +28,29 @@ def predict_failure(air_temp: float, process_temp: float, speed: float, torque: 
 
 # --- DATA ANALYSIS TOOLS ---
 
-# --- DATA ANALYSIS TOOLS ---
-
 @tool
 def get_failed_machines(query: str = ""):
-    """Identifies machines currently marked as failed in the maintenance logs. Input can be an empty string."""
+    """Returns a list of failed machines from maintenance.csv. Input is optional."""
     df = pd.read_csv('data/maintenance.csv')
     failures = df[df['Machine failure'] == 1]
-    
-    failure_types = ['TWF', 'HDF', 'PWF', 'OSF', 'RNF']
     result = []
-    
     for _, row in failures.iterrows():
-        active_failures = [f for f in failure_types if row[f] == 1]
-        result.append({
-            "product_id": row['Product ID'],
-            "failure_type": active_failures[0] if active_failures else "Unknown"
-        })
+        result.append({"product_id": row['Product ID'], "failure_type": row.get('failure_type', 'Unknown')})
     return str(result)
 
 @tool
-def get_commodity_price(commodity_name: str):
-    """Fetches the latest market price for industrial materials (Copper, Aluminum, Steel)."""
+def get_internal_commodity_prices(commodity_name: str):
+    """Checks the LOCAL commodity.csv for the last recorded price of a material."""
     df = pd.read_csv('data/commodity.csv')
     target = df[df['commodity_name'].str.contains(commodity_name, case=False)]
     if not target.empty:
         latest = target.iloc[-1]
-        return f"Price for {commodity_name}: {latest['price_nominal_usd']} {latest['unit']} ({latest['date']})"
-    return "Commodity not found."
+        return f"Internal Record: {commodity_name} is {latest['price_nominal_usd']} per {latest['unit']}."
+    return "Material not found in local records."
 
 @tool
 def get_supplier_info(query: str = ""):
-    """Retrieves top-tier suppliers based on reliability and lead times. Input can be an empty string."""
+    """Checks the internal logistics database for reliable suppliers. Input is optional."""
     df = pd.read_csv('data/industrial_cleaned.csv')
     best_suppliers = df[df['Reliability_Score'] > 0.8].sort_values(by='Lead_Time_Supplier')
     return str(best_suppliers[['Supplier_ID', 'Lead_Time_Supplier', 'Reliability_Score']].head(3).to_dict())
@@ -94,10 +85,6 @@ def check_maintenance_sensors(product_id: str):
     data = df[df['Product ID'] == product_id]
     return data.to_dict() if not data.empty else "Machine ID not found."
 
-@tool
-def check_market_prices(commodity: str):
-    """Retrieves latest global pricing for industrial commodities."""
-    return get_commodity_price(commodity)
 
 @tool
 def analyze_sensor_trends(product_id: str, sensor_name: str):
