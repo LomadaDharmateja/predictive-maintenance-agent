@@ -56,7 +56,6 @@ class IndustrialAI:
             get_supplier_info,
             get_commodity_price
         ]
-
         # Unified System Persona
         self.prompt = ChatPromptTemplate.from_messages([
             ("system", """You are a Senior Industrial Systems Engineer at VULCAN OS. 

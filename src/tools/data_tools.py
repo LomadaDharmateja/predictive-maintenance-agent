@@ -27,8 +27,12 @@ def predict_failure(air_temp: float, process_temp: float, speed: float, torque: 
     return f"Failure Probability: {probability:.2%}. Risk Status: {risk_level}."
 
 # --- DATA ANALYSIS TOOLS ---
-def get_failed_machines():
-    """Identifies machines currently marked as failed in the maintenance logs."""
+
+# --- DATA ANALYSIS TOOLS ---
+
+@tool
+def get_failed_machines(query: str = ""):
+    """Identifies machines currently marked as failed in the maintenance logs. Input can be an empty string."""
     df = pd.read_csv('data/maintenance.csv')
     failures = df[df['Machine failure'] == 1]
     
@@ -39,29 +43,26 @@ def get_failed_machines():
         active_failures = [f for f in failure_types if row[f] == 1]
         result.append({
             "product_id": row['Product ID'],
-            "failure_type": active_failures[0] if active_failures else "Unknown",
-            "air_temp": row['Air temperature [K]']
+            "failure_type": active_failures[0] if active_failures else "Unknown"
         })
-    return result
+    return str(result)
 
-def get_commodity_price(commodity_name):
+@tool
+def get_commodity_price(commodity_name: str):
     """Fetches the latest market price for industrial materials (Copper, Aluminum, Steel)."""
     df = pd.read_csv('data/commodity.csv')
     target = df[df['commodity_name'].str.contains(commodity_name, case=False)]
     if not target.empty:
         latest = target.iloc[-1]
-        return {
-            "price": latest['price_nominal_usd'],
-            "unit": latest['unit'],
-            "date": latest['date']
-        }
+        return f"Price for {commodity_name}: {latest['price_nominal_usd']} {latest['unit']} ({latest['date']})"
     return "Commodity not found."
 
-def get_supplier_info():
-    """Retrieves top-tier suppliers based on reliability and lead times."""
+@tool
+def get_supplier_info(query: str = ""):
+    """Retrieves top-tier suppliers based on reliability and lead times. Input can be an empty string."""
     df = pd.read_csv('data/industrial_cleaned.csv')
     best_suppliers = df[df['Reliability_Score'] > 0.8].sort_values(by='Lead_Time_Supplier')
-    return best_suppliers[['Supplier_ID', 'Lead_Time_Supplier', 'Reliability_Score']].head(3).to_dict()
+    return str(best_suppliers[['Supplier_ID', 'Lead_Time_Supplier', 'Reliability_Score']].head(3).to_dict())
 
 def calculate_risk_scores():
     """Calculates fleet health scores for the Daily Autonomous Audit dashboard."""
