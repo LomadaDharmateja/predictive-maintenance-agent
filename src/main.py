@@ -70,18 +70,18 @@ class IndustrialAI:
         self.memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
         self.executor = AgentExecutor(agent=self.agent, tools=self.tools, memory=self.memory, verbose=True)
 
-def run_analysis(self):
-    """Runs a fully autonomous executive system audit."""
-    # We now ask the Agent to find the failures itself using its tools
-    prompt = """
-    FACTORY AUDIT TASK:
-    1. Use 'get_failed_machines' to identify how many units have failed and their codes.
-    2. Pick the most critical failure (e.g., PWF or HDF).
-    3. Research the repair steps in the technical manual.
-    4. Check the market for part prices.
-    
-    Provide a summary of the total failures found and a deep-dive plan for the most urgent one.
-    """
-    
-    response = self.executor.invoke({"input": prompt})
-    return response["output"]
+    def run_analysis(self):
+        """Runs a fully autonomous executive system audit."""
+        # We now ask the Agent to find the failures itself using its tools
+        prompt = """
+        FACTORY AUDIT TASK:
+        1. Use 'get_failed_machines' to identify how many units have failed and their codes.
+        2. Pick the most critical failure (e.g., PWF or HDF).
+        3. Research the repair steps in the technical manual.
+        4. Check the market for part prices.
+        
+        Provide a summary of the total failures found and a deep-dive plan for the most urgent one.
+        """
+        
+        response = self.executor.invoke({"input": prompt})
+        return response["output"]
