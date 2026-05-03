@@ -16,7 +16,9 @@ from tools.data_tools import (
     run_sql_query, 
     get_market_news, 
     predict_failure,
-    get_failed_machines
+    get_failed_machines,
+    get_commodity_price,
+    get_supplier_info   
 )
 
 load_dotenv()
@@ -49,7 +51,10 @@ class IndustrialAI:
             consult_technical_manual, 
             run_sql_query, 
             get_market_news, 
-            predict_failure
+            predict_failure,
+            get_failed_machines,
+            get_supplier_info,
+            get_commodity_price
         ]
 
         # Unified System Persona
@@ -69,15 +74,18 @@ class IndustrialAI:
         self.memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
         self.executor = AgentExecutor(agent=self.agent, tools=self.tools, memory=self.memory, verbose=True)
 
-    def run_analysis(self):
-        """Runs the high-level executive report."""
-        failures = get_failed_machines()
-        if not failures:
-            return "All systems nominal. No critical failures detected in current logs."
-
-        target = failures[0]
-        # We ask the agent to perform a multi-step investigation autonomously
-        prompt = f"Perform a full root-cause analysis for Machine {target['product_id']} experiencing {target['failure_type']}. Check the manual for fix steps and check the market for spare part pricing."
-        
-        response = self.executor.invoke({"input": prompt})
-        return response["output"]
+def run_analysis(self):
+    """Runs a fully autonomous executive system audit."""
+    # We now ask the Agent to find the failures itself using its tools
+    prompt = """
+    FACTORY AUDIT TASK:
+    1. Use 'get_failed_machines' to identify how many units have failed and their codes.
+    2. Pick the most critical failure (e.g., PWF or HDF).
+    3. Research the repair steps in the technical manual.
+    4. Check the market for part prices.
+    
+    Provide a summary of the total failures found and a deep-dive plan for the most urgent one.
+    """
+    
+    response = self.executor.invoke({"input": prompt})
+    return response["output"]
