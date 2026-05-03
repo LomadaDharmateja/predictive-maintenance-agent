@@ -3,15 +3,20 @@ from langchain_community.embeddings import HuggingFaceInferenceAPIEmbeddings
 from langchain_pinecone import PineconeVectorStore
 
 def get_vectorstore():
-    """Connects to the Pinecone cloud database using the Inference API."""
+    """Connects to the Pinecone cloud database with a more robust embedding call."""
     
-    # 1. Use the API for lightweight queries (Uses Cloud RAM, not yours!)
+    # Ensure the key is present
+    hf_key = os.getenv("HUGGINGFACE_API_KEY")
+    if not hf_key:
+        raise ValueError("HUGGINGFACE_API_KEY is missing from environment variables.")
+
+    # 1. Use the Inference API (Standardized Model Name)
     embeddings = HuggingFaceInferenceAPIEmbeddings(
-        api_key=os.getenv("HUGGINGFACE_API_KEY"),
-        model_name="sentence-transformers/all-MiniLM-L6-v2" 
+        api_key=hf_key,
+        model_name="sentence-transformers/all-MiniLM-L6-v2"
     )
     
-    # 2. Connect to the existing Pinecone index
+    # 2. Connect to Pinecone
     vectorstore = PineconeVectorStore(
         index_name="vulcan-manuals",
         embedding=embeddings,
@@ -22,8 +27,11 @@ def get_vectorstore():
 
 def search_manual(query):
     """Searches the indexed PDF manual for technical repair steps."""
-    vectorstore = get_vectorstore()
-    # Retrieve the top 3 most relevant paragraphs
-    results = vectorstore.similarity_search(query, k=3)
-    context = "\n".join([res.page_content for res in results])
-    return context
+    try:
+        vectorstore = get_vectorstore()
+        # Retrieve the top 3 most relevant paragraphs
+        results = vectorstore.similarity_search(query, k=3)
+        context = "\n".join([res.page_content for res in results])
+        return context
+    except Exception as e:
+        return f"Error searching technical manual: {str(e)}"
