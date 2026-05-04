@@ -81,14 +81,33 @@ with tab_pred:
             st.metric(f"Unit {row['Product ID'][-5:]}", f"{int(row['health_score'])}%")
 
 with tab_chat:
-    if "messages" not in st.session_state: st.session_state.messages = []
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]): st.markdown(msg["content"])
+    st.markdown("### Consult System Engineer")
+    
+    # 1. Initialize history if it doesn't exist
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
 
-    if prompt := st.chat_input("Ask VULCAN..."):
+    # 2. ALWAYS display the history first (This keeps the order straight)
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    # 3. Handle the new input
+    if prompt := st.chat_input("Ask about maintenance, manuals, or parts..."):
+        # Display user message immediately
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        
+        # Add to session state history
         st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"): st.markdown(prompt)
+
+        # Generate and display assistant response
         with st.chat_message("assistant"):
-            response = st.session_state.agent.executor.invoke({"input": prompt})
-            st.markdown(response["output"])
-            st.session_state.messages.append({"role": "assistant", "content": response["output"]})
+            with st.spinner("Orchestrating Agents..."):
+                # Call the executor
+                response = st.session_state.agent.executor.invoke({"input": prompt})
+                output = response["output"]
+                st.markdown(output)
+        
+        # Add assistant response to session state history so it stays on rerun
+        st.session_state.messages.append({"role": "assistant", "content": output})
