@@ -30,12 +30,29 @@ def predict_failure(air_temp: float, process_temp: float, speed: float, torque: 
 
 @tool
 def get_failed_machines(query: str = ""):
-    """Returns a list of failed machines from maintenance.csv. Input is optional."""
+    """Returns a list of failed machines from maintenance.csv with decoded failure types."""
     df = pd.read_csv('data/maintenance.csv')
+    
+    # Filter only the rows where a failure actually occurred
     failures = df[df['Machine failure'] == 1]
+    
+    # These are the standard column names for the AI4I dataset failure types
+    failure_columns = ['TWF', 'HDF', 'PWF', 'OSF', 'RNF']
+    
     result = []
     for _, row in failures.iterrows():
-        result.append({"product_id": row['Product ID'], "failure_type": row.get('failure_type', 'Unknown')})
+        # Find which column has the '1'
+        actual_type = "Unknown"
+        for col in failure_columns:
+            if col in row and row[col] == 1:
+                actual_type = col
+                break
+        
+        result.append({
+            "product_id": row['Product ID'], 
+            "failure_type": actual_type
+        })
+        
     return str(result)
 
 @tool
