@@ -1,4 +1,5 @@
 import os
+import time  # 1. Added time module for rate-limiting protection
 import logging
 from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -14,9 +15,9 @@ from tools.data_tools import (
     run_sql_query, 
     get_market_news, 
     predict_failure,
-    get_failed_machines,           # Matching new tool
-    get_supplier_info,             # Matching new tool
-    get_internal_commodity_prices  # Matching new tool
+    get_failed_machines,           
+    get_supplier_info,             
+    get_internal_commodity_prices  
 )
 
 load_dotenv()
@@ -36,9 +37,9 @@ class IndustrialAI:
         
         # Use the latest Flash-Lite for high-speed, low-cost inference
         self.llm = ChatGoogleGenerativeAI(
-            model="gemini-3.5-flash", 
+            model="gemini-2.5-flash-lite", 
             google_api_key=os.getenv("GOOGLE_API_KEY"),
-            temperature=0.3 # Lowered for more factual industrial responses
+            temperature=0.3 
         )
 
         # Tools provided to the Agent
@@ -47,19 +48,21 @@ class IndustrialAI:
             check_maintenance_sensors, 
             consult_technical_manual, 
             run_sql_query, 
-            get_market_news,                # Outside World (Tavily)
+            get_market_news,                
             predict_failure,
-            get_failed_machines,            # Internal Data
-            get_supplier_info,              # Internal Data
-            get_internal_commodity_prices   # Internal Data[cite: 4]
+            get_failed_machines,            
+            get_supplier_info,              
+            get_internal_commodity_prices   
         ]
+        
         # Unified System Persona
         self.prompt = ChatPromptTemplate.from_messages([
             ("system", """You are a Senior Industrial Systems Engineer at VULCAN OS. 
             You have autonomous access to sensors, manuals, and market data.
             Rules:
             1. If a sensor is abnormal, check the technical manual using 'consult_technical_manual'.
-            2. If a part needs replacement, check 'check_market_prices'.
+            2. If a part needs replacement, check 'get_internal_commodity_prices' or 'get_supplier_info'. 
+               (Note: Ensure you use the exact tool names available to you).
             3. Always provide a factual, engineering-based reasoning."""),
             MessagesPlaceholder(variable_name="chat_history"),
             ("human", "{input}"),
@@ -71,8 +74,7 @@ class IndustrialAI:
         self.executor = AgentExecutor(agent=self.agent, tools=self.tools, memory=self.memory, verbose=True)
 
     def run_analysis(self):
-        """Runs a fully autonomous executive system audit."""
-        # We now ask the Agent to find the failures itself using its tools
+        """Runs a fully autonomous executive system audit with rate-limit handling."""
         prompt = """
         FACTORY AUDIT TASK:
         1. Use 'get_failed_machines' to identify how many units have failed and their codes.
@@ -83,5 +85,21 @@ class IndustrialAI:
         Provide a summary of the total failures found and a deep-dive plan for the most urgent one.
         """
         
-        response = self.executor.invoke({"input": prompt})
-        return response["output"]
+        # 2. Wrap the execution loop so your UI app.py doesn't completely crash on a 429
+        try:
+            logger.info("Starting factory audit execution...")
+            response = self.executor.invoke({"input": prompt})
+            
+            # 3. Rate-Limit Buffer: Give the Free Tier API key 4-5 seconds to breathe 
+            # before app.py allows another audit request to fire.
+            time.sleep(4)
+            return response["output"]
+            
+        except Exception as e:
+            logger.error(f"Error during execution: {str(e)}")
+            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                print("⚠️ Free Tier limit exhausted! Initiating cooldown delay...")
+                time.sleep(15) # Force wait to reset window
+                return "The system is cooling down from an API rate-limiting block. Please try again in a moment."
+            else:
+                return f"An error occurred: {str(e)}"
