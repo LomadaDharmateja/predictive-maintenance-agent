@@ -9,22 +9,22 @@ on:
 jobs:
   test_and_build:
     runs-on: ubuntu-latest
-    # --- THE FIX: Give the pipeline permission to upload ---
     permissions:
       contents: read
       packages: write
-    # -------------------------------------------------------
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'       # 🎯 FIXED: Forces the GitHub test runner to use Python 3.11
 
       - name: Install Dependencies
         run: |
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest
 
@@ -32,6 +32,8 @@ jobs:
         env:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          HUGGINGFACE_API_KEY: ${{ secrets.HUGGINGFACE_API_KEY }}
+          PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
         run: pytest tests/
 
       - name: Log in to GitHub Container Registry
