@@ -5,3 +5,12 @@
 2026-04-14 19:28:33,618 | httpx | INFO | HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent "HTTP/1.1 503 Service Unavailable"
 2026-04-14 19:28:33,619 | google_genai._api_client | INFO | Retrying google.genai._api_client.BaseApiClient._request_once in 2.79 seconds as it raised ServerError: 503 UNAVAILABLE. {'error': {'code': 503, 'message': 'This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.', 'status': 'UNAVAILABLE'}}.
 2026-04-14 19:28:49,084 | httpx | INFO | HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent "HTTP/1.1 200 OK"
+2026-05-25 22:41:09,909 | VULCAN | INFO | VULCAN AI Brain initializing with Gemini 2.5 Flash-Lite.
+2026-05-25 22:41:09,920 | VULCAN | INFO | VULCAN AI Brain initializing with Gemini 2.5 Flash-Lite.
+2026-05-25 22:53:02,515 | VULCAN | INFO | VULCAN AI Brain initializing with Gemini 2.5 Flash-Lite.
+2026-05-25 22:53:26,609 | VULCAN | INFO | Starting factory audit execution...
+2026-05-25 22:53:28,411 | httpx | INFO | HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:streamGenerateContent?alt=sse "HTTP/1.1 200 OK"
+2026-05-25 22:53:29,196 | httpx | INFO | HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:streamGenerateContent?alt=sse "HTTP/1.1 200 OK"
+2026-05-25 22:53:32,131 | httpx | INFO | HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:streamGenerateContent?alt=sse "HTTP/1.1 200 OK"
+2026-05-25 22:53:38,623 | httpx | INFO | HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:streamGenerateContent?alt=sse "HTTP/1.1 200 OK"
+2026-05-25 22:53:39,500 | httpx | INFO | HTTP Request: POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:streamGenerateContent?alt=sse "HTTP/1.1 200 OK"

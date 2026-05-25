@@ -37,7 +37,7 @@ class IndustrialAI:
         
         # Use the latest Flash-Lite for high-speed, low-cost inference
         self.llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash-lite", 
+            model="gemini-3.1-flash-lite", 
             google_api_key=os.getenv("GOOGLE_API_KEY"),
             temperature=0.3 
         )
@@ -92,7 +92,7 @@ class IndustrialAI:
             
             # 3. Rate-Limit Buffer: Give the Free Tier API key 4-5 seconds to breathe 
             # before app.py allows another audit request to fire.
-            time.sleep(4)
+            time.sleep(1)
             return response["output"]
             
         except Exception as e:
