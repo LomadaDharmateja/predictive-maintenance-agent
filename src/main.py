@@ -87,19 +87,22 @@ class IndustrialAI:
         
         # 2. Wrap the execution loop so your UI app.py doesn't completely crash on a 429
         try:
-            logger.info("Starting factory audit execution...")
             response = self.executor.invoke({"input": prompt})
+            raw_output = response["output"]
             
-            # 3. Rate-Limit Buffer: Give the Free Tier API key 4-5 seconds to breathe 
-            # before app.py allows another audit request to fire.
+            # --- EXTRACT TEXT IF IT IS A LIST BLOCK ---
+            if isinstance(raw_output, list) and len(raw_output) > 0:
+                if isinstance(raw_output[0], dict) and 'text' in raw_output[0]:
+                    raw_output = raw_output[0]['text']
+                    
             time.sleep(1)
-            return response["output"]
+            return raw_output
             
         except Exception as e:
             logger.error(f"Error during execution: {str(e)}")
             if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
                 print("⚠️ Free Tier limit exhausted! Initiating cooldown delay...")
-                time.sleep(15) # Force wait to reset window
+                time.sleep(2) # Force wait to reset window
                 return "The system is cooling down from an API rate-limiting block. Please try again in a moment."
             else:
                 return f"An error occurred: {str(e)}"
