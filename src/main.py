@@ -36,7 +36,7 @@ class IndustrialAI:
         
         # Use the latest Flash-Lite for high-speed, low-cost inference
         self.llm = ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash-lite", 
+            model="gemini-3.5-flash", 
             google_api_key=os.getenv("GOOGLE_API_KEY"),
             temperature=0.3 # Lowered for more factual industrial responses
         )
