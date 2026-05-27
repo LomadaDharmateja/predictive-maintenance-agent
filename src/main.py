@@ -57,7 +57,7 @@ class IndustrialAI:
         self.llm = ChatGoogleGenerativeAI(
             model="gemini-3.1-flash-lite", 
             google_api_key=os.getenv("GOOGLE_API_KEY"),
-            temperature=0.3 
+            temperature=0.2 
         )
 
         self.tools = [
