@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "tables": {
+    "errors": {
+      "rows": 3919,
+      "sha256": "b2d7207ceb84670b72d65c3e58e9adf31583e024d10caca0808a5886bfd46061"
+    },
+    "failures": {
+      "rows": 761,
+      "sha256": "8c188a9e7023eb063ba93a9b2910f6b5604ec373fc2d3aaf978905af618a7e0b"
+    },
+    "machines": {
+      "rows": 100,
+      "sha256": "c6b7820dba659080db518713352a225d1480b6a3690b255ecde9a9acfd617b71"
+    },
+    "maint": {
+      "rows": 3286,
+      "sha256": "58a7d5e2d34aa8fa32052cf2567c286ae8f143d29dbc8400e5a7d9cc5ce268e8"
+    },
+    "parts_inventory": {
+      "rows": 9,
+      "sha256": "e5d53aac4e19fdd5b8f3ea431b6888862028e0b84da95b596b20bbfdf97679a5"
+    },
+    "telemetry": {
+      "rows": 876100,
+      "sha256": "13fc73df72ca8cafd5e51d5e5d383d63a9e9a112c982a05a9dfbd29c5f7ca7f0"
+    }
+  }
+}

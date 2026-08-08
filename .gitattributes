@@ -1,0 +1,19 @@
+* text=auto
+
+# The data layer's inputs and outputs are byte-compared, so git must not
+# rewrite their line endings. `scripts/generate_inventory.py` pins
+# lineterminator="\n" and `tests/` assert the build is byte-identical; a CRLF
+# conversion on checkout would change the checksum and produce a spurious diff
+# every time the generator is re-run.
+#
+# Scoped to these two directories on purpose. A blanket `*.csv -text` would also
+# catch archive/v1-data/, whose files were committed under the old convention.
+data/raw/**       -text
+data/generated/** -text
+
+*.db  binary
+*.pkl binary
+*.pdf binary
+
+# GNU make treats a trailing \r as part of the command and fails on it.
+Makefile text eol=lf

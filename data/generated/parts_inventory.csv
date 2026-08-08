@@ -1,0 +1,10 @@
+part_id,component,compatible_models,stock_quantity,unit_cost,supplier_id,lead_time_days
+PN-COMP1-001,comp1,model1,22,471.05,SUP-001,10
+PN-COMP1-002,comp1,model2|model3|model4,32,241.14,SUP-005,17
+PN-COMP2-001,comp2,model1|model2|model3|model4,37,161.42,SUP-004,32
+PN-COMP3-001,comp3,model3,5,539.21,SUP-002,31
+PN-COMP3-002,comp3,model2|model4,21,664.86,SUP-005,15
+PN-COMP3-003,comp3,model1,40,1174.02,SUP-004,31
+PN-COMP4-001,comp4,model4,4,73.04,SUP-001,12
+PN-COMP4-002,comp4,model2|model3,26,108.3,SUP-005,23
+PN-COMP4-003,comp4,model1,20,57.55,SUP-002,34

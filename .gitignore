@@ -6,8 +6,15 @@ venv/
 __pycache__/
 *.pyc
 
-# Database and ML Models (Optional, but good practice to exclude huge files)
-# Note: If your .db and .pkl are small enough, you can leave these commented out
-# data/*.db 
-# models/*.pkl
-# data/chroma_db/
+# Build output of the data layer. 136 MB, and `make data` rebuilds it
+# deterministically from data/raw/, so there is nothing to gain by committing it.
+data/pdm.db
+
+# 77 MB. Deliberately not committed: it would roughly triple the repository and
+# could only be removed again by rewriting history. Download it before running
+# `make data` -- docs/DATA.md section 1 has the source and a checksum.
+# The other four raw CSVs total 260 KB and are committed.
+data/raw/PdM_telemetry.csv
+
+# Test / tooling
+.pytest_cache/
