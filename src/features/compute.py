@@ -24,6 +24,7 @@ import pandas as pd
 
 from src.features.config import (
     COMPONENTS,
+    COVERAGE_WINDOWS,
     ERROR_IDS,
     ERROR_WINDOWS,
     FEATURE_COLUMNS,
@@ -71,6 +72,18 @@ def compute_features(store: FeatureStore, as_of: pd.Timestamp) -> pd.DataFrame:
             # ddof=0, so a partial window at the start of the series gives 0.0
             # rather than NaN. See config.STD_DDOF.
             columns[f"{sensor}_std_{name}"] = block.std(axis=0, ddof=STD_DDOF)
+
+    # -- Window coverage -----------------------------------------------------
+    # The number of hourly grid points the window actually spanned. Identical
+    # for every machine at a given `as_of` -- it is a property of position in the
+    # series, not of the machine -- but it is emitted per row so a consumer never
+    # has to reconstruct it from `datetime`.
+    for name, window in COVERAGE_WINDOWS.items():
+        steps = _window_steps(window)
+        covered = min(steps, index + 1)
+        columns[f"window_coverage_{name}"] = np.full(
+            store.n_machines, float(covered)
+        )
 
     # -- Error counts --------------------------------------------------------
     # An event is counted in the window ending at `index` if its arrival

@@ -41,6 +41,18 @@ TELEMETRY_WINDOWS = {"3h": pd.Timedelta(hours=3), "24h": pd.Timedelta(hours=24)}
 #: Lookback windows for error counts.
 ERROR_WINDOWS = {"24h": pd.Timedelta(hours=24), "7d": pd.Timedelta(days=7)}
 
+#: Distinct window widths, for the coverage features.
+#:
+#: Three, not four. Coverage -- how many hourly grid points a window actually
+#: spanned -- depends only on the width and the position in the series, not on
+#: which table is being aggregated. The telemetry 24h window and the error 24h
+#: window therefore produce the identical column, and shipping both would be a
+#: perfectly collinear duplicate. See docs/FEATURES.md.
+COVERAGE_WINDOWS = {
+    name: width
+    for name, width in {**TELEMETRY_WINDOWS, **ERROR_WINDOWS}.items()
+}
+
 #: Delta degrees of freedom for the rolling standard deviation.
 #:
 #: 0, not pandas' default of 1, and deliberately. The first prediction times in
@@ -85,6 +97,12 @@ FEATURE_COLUMNS: list[str] = (
         for window in TELEMETRY_WINDOWS
         for stat in ("mean", "std")
     ]
+    # How many hourly grid points each window actually contained. Constant once
+    # the series is wide enough; below that it is what lets a model discount a
+    # partial window instead of reading a 1-sample mean as if it were a
+    # 24-sample one. Partial windows are kept rather than trimmed because a
+    # warm-up trim would delete all 18 anomalous failures -- docs/FEATURES.md.
+    + [f"window_coverage_{window}" for window in COVERAGE_WINDOWS]
     + [
         f"{error_id}_count_{window}"
         for error_id in ERROR_IDS

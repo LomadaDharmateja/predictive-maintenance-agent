@@ -23,6 +23,7 @@ from src.features.build import (
 from src.features.compute import compute_features, compute_labels
 from src.features.config import (
     COMPONENTS,
+    COVERAGE_WINDOWS,
     ERROR_IDS,
     ERROR_WINDOWS,
     FEATURE_COLUMNS,
@@ -67,13 +68,22 @@ def subset_store(real_subset_frames):
 
 def test_feature_count_matches_the_specified_groups():
     telemetry = len(SENSORS) * len(TELEMETRY_WINDOWS) * 2  # mean and std
+    coverage = len(COVERAGE_WINDOWS)
     errors = len(ERROR_IDS) * len(ERROR_WINDOWS)
     maint = len(COMPONENTS)
     machine = 1 + len(MACHINE_MODELS)  # age, plus one indicator per model
 
-    assert (telemetry, errors, maint, machine) == (16, 10, 4, 5)
-    assert len(FEATURE_COLUMNS) == 35
-    assert len(FEATURE_COLUMNS) == telemetry + errors + maint + machine
+    assert (telemetry, coverage, errors, maint, machine) == (16, 3, 10, 4, 5)
+    assert len(FEATURE_COLUMNS) == 38
+    assert len(FEATURE_COLUMNS) == telemetry + coverage + errors + maint + machine
+
+
+def test_coverage_windows_are_deduplicated_by_width():
+    """Three coverage features, not four. Coverage depends only on window width
+    and position in the series, so the telemetry 24h and error 24h windows would
+    emit the same column."""
+    assert set(COVERAGE_WINDOWS) == {"3h", "24h", "7d"}
+    assert COVERAGE_WINDOWS["24h"] == TELEMETRY_WINDOWS["24h"] == ERROR_WINDOWS["24h"]
 
 
 def test_feature_names_are_unique():
@@ -326,6 +336,52 @@ def test_seven_day_window_is_wider_than_the_twenty_four_hour_one(store, frames):
 
     assert features.loc[1, "error4_count_24h"] == 0
     assert features.loc[1, "error4_count_7d"] == 1
+
+
+@pytest.mark.parametrize(
+    "index, expected",
+    [
+        (0, {"3h": 1, "24h": 1, "7d": 1}),
+        (2, {"3h": 3, "24h": 3, "7d": 3}),
+        (23, {"3h": 3, "24h": 24, "7d": 24}),
+        (167, {"3h": 3, "24h": 24, "7d": 168}),
+        (300, {"3h": 3, "24h": 24, "7d": 168}),
+    ],
+)
+def test_window_coverage_counts_the_grid_points_actually_spanned(
+    store, index, expected
+):
+    features = compute_features(store, synthetic.grid()[index])
+    for name, count in expected.items():
+        assert (features[f"window_coverage_{name}"] == count).all()
+
+
+def test_window_coverage_matches_the_readings_the_mean_averaged(
+    real_subset_frames, subset_store
+):
+    """Cross-check against the brute-force window: coverage must equal the number
+    of telemetry rows the rolling mean actually saw, which is the whole point of
+    the feature."""
+    telemetry = real_subset_frames["telemetry"]
+    machine = int(subset_store.machine_ids[0])
+    for index in [0, 1, 5, 30, 200, 1000]:
+        as_of = subset_store.times[index]
+        features = compute_features(subset_store, as_of)
+        for name, window in TELEMETRY_WINDOWS.items():
+            rows = telemetry[telemetry["machineID"] == machine]
+            when = pd.to_datetime(rows["datetime"])
+            n_readings = int(((when > as_of - window) & (when <= as_of)).sum())
+            assert features.loc[machine, f"window_coverage_{name}"] == n_readings
+
+
+def test_window_coverage_is_constant_after_the_widest_window_fills(store):
+    """Honest limitation, pinned: these features vary only over the first 168
+    hours. Across val and test they are constant and carry no signal."""
+    for index in [200, 300, 399]:
+        features = compute_features(store, synthetic.grid()[index])
+        assert features["window_coverage_3h"].unique().tolist() == [3.0]
+        assert features["window_coverage_24h"].unique().tolist() == [24.0]
+        assert features["window_coverage_7d"].unique().tolist() == [168.0]
 
 
 def test_partial_windows_at_the_start_of_the_series_give_zero_std(store):

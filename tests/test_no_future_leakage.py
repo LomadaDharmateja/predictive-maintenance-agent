@@ -303,37 +303,85 @@ def split_times(real_store) -> dict[str, pd.DatetimeIndex]:
     return {split: prediction_times(real_store, split) for split in SPLIT_ORDER}
 
 
+### Four tests guard the split boundary, and none of them is redundant.
+#
+# 1. `test_gap_between_splits_is_at_least_the_label_horizon` is the real one. It
+#    measures the gap itself and is the only test that fails on its own when the
+#    embargo is removed.
+# 2. `test_embargo_separates_consecutive_splits` is the assertion the milestone
+#    specified. On its own it is weak: it adds EMBARGO to one side, so at
+#    EMBARGO = 0 it degenerates to "train ends before val starts", which is true
+#    of any two adjacent periods. It is kept because it is the form the
+#    requirement was written in, and it does catch an embargo applied in the
+#    wrong direction.
+# 3. `test_splits_do_not_overlap` catches ordering errors that leave a gap of the
+#    right size but on the wrong side.
+# 4. `test_embargo_is_derived_from_the_label_horizon` catches the embargo being
+#    silently decoupled from the horizon, which the three above cannot see
+#    because they all read the same constant they are checking.
+#
+# Confirmed empirically: setting EMBARGO = 0 fails 1 and 4 and leaves 2 and 3
+# passing.
+
+
+@pytest.mark.parametrize("earlier, later", [("train", "val"), ("val", "test")])
+def test_gap_between_splits_is_at_least_the_label_horizon(
+    split_times, earlier, later
+):
+    """The gap measured directly, with no constant added to either side.
+
+    This is what actually holds the guarantee: a training row's label window
+    extends LABEL_HORIZON past its own timestamp, so unless the gap to the next
+    split is at least that wide, some training label is computed from rows that
+    belong to the next split.
+    """
+    gap = split_times[later].min() - split_times[earlier].max()
+    assert gap >= LABEL_HORIZON, (
+        f"{earlier} ends {split_times[earlier].max()}, {later} starts "
+        f"{split_times[later].min()}, gap {gap} < horizon {LABEL_HORIZON}"
+    )
+
+
 @pytest.mark.parametrize("earlier, later", [("train", "val"), ("val", "test")])
 def test_embargo_separates_consecutive_splits(split_times, earlier, later):
-    """Note what this alone does *not* catch: with `EMBARGO = 0` the inequality
-    is trivially satisfied, because adjacent splits already abut. Setting the
-    embargo to zero was tried, and it is `test_embargo_is_derived_from_the_label_horizon`
-    and `test_no_label_window_leaves_its_split` that fail. All three are needed.
-    """
+    """The assertion as specified. Weak alone -- see the note above -- and kept
+    alongside the direct gap measurement rather than in place of it."""
     assert split_times[earlier].max() + EMBARGO <= split_times[later].min()
 
 
 def test_splits_do_not_overlap(split_times):
+    """Ordering, independent of gap width."""
     for earlier, later in [("train", "val"), ("val", "test")]:
         assert split_times[earlier].max() < split_times[later].min()
 
 
 def test_embargo_is_derived_from_the_label_horizon():
-    """Not a magic 24. If the horizon moves, the embargo moves with it."""
+    """Not a magic 24. If the horizon moves, the embargo moves with it.
+
+    The three tests above all read EMBARGO or LABEL_HORIZON while checking data
+    derived from the same constant, so none of them notices if the two are
+    decoupled. This one does."""
     assert EMBARGO == LABEL_HORIZON
 
 
 def test_split_ordering_check_detects_a_missing_embargo(real_store):
-    """Without the embargo, train's last row and val's first row are adjacent
-    and the section-4 assertion must fail."""
+    """Without the embargo, train runs to the last hour of September and the gap
+    to validation is one hour, not twenty-five.
+
+    Note which assertion catches it. The direct gap measurement fails. The
+    specified `max + EMBARGO <= min` form does *not*, because at EMBARGO = 0 it
+    reduces to an ordering check -- which is exactly why both are kept.
+    """
     train_end = SPLITS["train"][1]
     val_start = SPLITS["val"][0]
     no_embargo_train_max = real_store.times[real_store.times <= train_end].max()
     val_min = real_store.times[real_store.times >= val_start].min()
 
-    assert_raises_assertion(
-        lambda: _assert_true(no_embargo_train_max + EMBARGO <= val_min)
-    )
+    gap = val_min - no_embargo_train_max
+    assert_raises_assertion(lambda: _assert_true(gap >= LABEL_HORIZON))
+
+    # The weak form survives, demonstrating the gap in coverage it leaves.
+    _assert_true(no_embargo_train_max + pd.Timedelta(0) <= val_min)
 
 
 def _assert_true(condition) -> None:
