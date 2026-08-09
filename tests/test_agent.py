@@ -528,3 +528,60 @@ def test_unknown_tool_is_rejected_by_the_loop(database):
     result = Agent(client, database=database).run("run some sql")
     errors = [e for e in result.log.entries if e.kind == "tool_error"]
     assert errors and errors[0].error_code == ErrorCode.INVALID_INPUT.value
+
+
+# ======================================================================
+# Calibration trustworthiness (MILESTONE_5 section 0)
+# ======================================================================
+
+
+def test_calibrated_flag_is_required_on_every_risk():
+    """A probability that is not established as better than the base rate must
+    not be presented as a trustworthy one. The flag is required, not optional."""
+    field = ComponentRisk.model_fields["calibrated"]
+    assert field.is_required()
+    for name in ("brier_skill_holdout", "brier_skill_ci_low", "brier_skill_ci_high"):
+        assert ComponentRisk.model_fields[name].is_required()
+
+
+def test_calibrated_flag_matches_the_measurement(database):
+    """The flag is not hand-set: it must agree with calibration_check.json, and
+    that file's rule is skill > 0 with an interval excluding zero."""
+    measured = json.loads(
+        Path("data/generated/calibration_check.json").read_text(encoding="utf-8")
+    )["components"]
+
+    result = dispatch(
+        "get_failure_risk", {"machine_id": 7, "as_of": AS_OF.isoformat()}, database
+    )
+    assert isinstance(result, Success)
+
+    for risk in result.data.components:
+        record = measured[risk.component]
+        assert risk.calibrated is bool(record["calibrated"])
+        expected = record["skill_calibrated_held_out"] > 0 and record["skill_ci_low"] > 0
+        assert risk.calibrated is expected
+
+
+def test_at_least_one_component_is_flagged_uncalibrated(database):
+    """Anti-vacuity. If every component were trusted, the flag would be doing no
+    work and a regression that always returned True would pass unnoticed."""
+    result = dispatch(
+        "get_failure_risk", {"machine_id": 7, "as_of": AS_OF.isoformat()}, database
+    )
+    flags = {r.component: r.calibrated for r in result.data.components}
+    assert any(value is False for value in flags.values()), flags
+    assert any(value is True for value in flags.values()), flags
+
+
+def test_the_caveat_mentions_the_calibrated_flag(database):
+    result = dispatch(
+        "get_failure_risk", {"machine_id": 7, "as_of": AS_OF.isoformat()}, database
+    )
+    assert "calibrated" in result.data.caveat
+
+
+def test_the_prompt_requires_surfacing_uncalibrated_probabilities():
+    prompt = load_system_prompt()
+    assert "`calibrated`" in prompt
+    assert "base rate" in prompt

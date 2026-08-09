@@ -9,10 +9,14 @@ reader.
 Two constraints here are load-bearing and come from measurement, not taste:
 
 - **No output model carries a raw uncalibrated score.** `docs/EVALUATION.md`
-  section 4: Brier skill is negative for comp1 and comp3, so the raw numbers are
-  not probabilities. `ComponentRisk` exposes `calibrated_probability` only, and
-  `tests/test_agent_contracts.py` asserts by schema inspection that no field
-  anywhere is named for a raw score.
+  section 4: on the shipped logistic-regression models the *raw* Brier skill is
+  negative for comp1 (-0.116) and comp2 (-0.764), so the raw numbers are not
+  probabilities. `ComponentRisk` exposes `calibrated_probability` only, and
+  `tests/test_agent.py` asserts by schema inspection that no field anywhere is
+  named for a raw score.
+- **Every risk carries `calibrated`.** Isotonic repairs the negative raw skill,
+  but only comp2's held-out skill is established as better than the base rate.
+  The other three are flagged so the agent cannot present them as trustworthy.
 - **`PartsPosition` has no risk field.** The Milestone 3B conclusion is that
   parts reasoning cannot come from predictions; expressing that in the type
   system is stronger than writing it in a docstring.
@@ -140,10 +144,25 @@ class PartAdequacy(Strict):
 
 class ComponentRisk(Strict):
     component: ComponentName
-    #: Isotonic-calibrated. There is deliberately no raw-score field: raw scores
-    #: are not probabilities on this model (negative Brier skill for comp1 and
-    #: comp3), so exposing one would invite an agent to reason with it.
+    #: Isotonic-calibrated. There is deliberately no raw-score field: the raw
+    #: scores have negative Brier skill on two components, so exposing one would
+    #: invite an agent to reason with a number that is worse than the base rate.
     calibrated_probability: float = Field(ge=0.0, le=1.0)
+    #: Is this probability established as better than simply reporting the base
+    #: rate? True only when the held-out Brier skill is positive **and** its
+    #: bootstrap interval excludes zero. Measured by
+    #: `scripts/calibration_check.py` with 5-fold cross-fitted isotonic on
+    #: validation; on the shipped models only comp2 qualifies.
+    #:
+    #: Required, not optional. When False the agent must say so in the same
+    #: breath as the number -- a probability that is not established as better
+    #: than the base rate must not be presented as a trustworthy one.
+    calibrated: bool
+    #: The measurement behind `calibrated`, so the claim is checkable rather
+    #: than asserted.
+    brier_skill_holdout: float
+    brier_skill_ci_low: float
+    brier_skill_ci_high: float
     confidence_interval_low: float = Field(ge=0.0, le=1.0)
     confidence_interval_high: float = Field(ge=0.0, le=1.0)
     #: The cost-derived threshold in force, and the ratio it came from.

@@ -4,11 +4,13 @@
 
 **Only calibrated probabilities leave it.** The raw model score is never placed
 on an output model and never returned. On the shipped logistic-regression models
-the raw Brier skill is negative for comp1 (-0.116) and comp2 (-0.764): those
+the *raw* Brier skill is negative for comp1 (-0.116) and comp2 (-0.764): those
 numbers carry more squared error than predicting the base rate, so they are not
-probabilities. Isotonic scaling, fitted on validation, repairs them.
-`tests/test_agent_contracts.py` asserts no output schema anywhere exposes a raw
-score.
+probabilities. Isotonic scaling repairs the sign -- after calibration every
+component is at or above zero -- but only comp2's held-out skill is established
+as better than the base rate, so the other three carry `calibrated=False`.
+`scripts/calibration_check.py` is the measurement; `tests/test_agent.py` asserts
+no output schema exposes a raw score.
 
 **Every risk carries a `warning_adequacy`.** A probability an operator cannot act
 on is worse than no probability, because it invites an order that will arrive
@@ -58,6 +60,7 @@ MODELS_DIR = Path("models")
 GENERATED = Path("data/generated")
 VALIDATION_RESULTS = GENERATED / "validation_results.json"
 DETECTION_LEAD = GENERATED / "detection_lead_time.json"
+CALIBRATION_CHECK = GENERATED / "calibration_check.json"
 CALIBRATORS = MODELS_DIR / "calibrators.joblib"
 
 #: A warning is marginal rather than sufficient if it clears the lead time by
@@ -70,7 +73,10 @@ CAVEAT = (
     "Calibrated probability that this component fails within 14 days. It does "
     "not say when inside that window, or how severe. Trained on simulated data "
     "(Microsoft Azure PdM); no claim about real plant behaviour is supported. "
-    "Check warning_adequacy before treating any of this as actionable."
+    "Check warning_adequacy before treating any of this as actionable, and "
+    "check `calibrated`: where it is false, the probability is not established "
+    "as better than simply reporting the base rate and must not be quoted as a "
+    "reliable likelihood."
 )
 
 
@@ -86,7 +92,7 @@ def _artefacts() -> dict:
     """
     missing = [
         path
-        for path in (VALIDATION_RESULTS, DETECTION_LEAD, CALIBRATORS)
+        for path in (VALIDATION_RESULTS, DETECTION_LEAD, CALIBRATORS, CALIBRATION_CHECK)
         if not path.exists()
     ]
     if missing:
@@ -112,6 +118,7 @@ def _artefacts() -> dict:
         "calibrators": joblib.load(CALIBRATORS),
         "validation": json.loads(VALIDATION_RESULTS.read_text(encoding="utf-8")),
         "detection": json.loads(DETECTION_LEAD.read_text(encoding="utf-8")),
+        "calibration": json.loads(CALIBRATION_CHECK.read_text(encoding="utf-8")),
     }
 
 
@@ -198,6 +205,7 @@ def get_failure_risk(
         threshold = float(record["thresholds"]["10"]["threshold"])
         interval = record["series"][PRODUCTION_FAMILY]["ci"]["pr_auc"]
         lead_hours = detection.get(component, {}).get("median_hours")
+        quality = artefacts["calibration"]["components"][component]
 
         per_part = [
             PartAdequacy(
@@ -214,6 +222,12 @@ def get_failure_risk(
             ComponentRisk(
                 component=component,
                 calibrated_probability=round(calibrated, 4),
+                calibrated=bool(quality["calibrated"]),
+                brier_skill_holdout=round(
+                    quality["skill_calibrated_held_out"], 4
+                ),
+                brier_skill_ci_low=round(quality["skill_ci_low"], 4),
+                brier_skill_ci_high=round(quality["skill_ci_high"], 4),
                 # The interval is the model's PR-AUC interval, not a per-row
                 # predictive interval. Named as such on the schema so it is not
                 # mistaken for uncertainty about this machine.

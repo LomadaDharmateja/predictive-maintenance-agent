@@ -491,6 +491,79 @@ skill is negative for comp1 (-0.116) and comp2 (-0.764), where on LightGBM
 it was comp1 and comp3. The components change; the constraint does not.
 Raw scores are not probabilities and no tool may expose one.
 
+---
+
+## 10. Is the calibrated probability trustworthy?
+
+`docs/MILESTONE_5.md` section 0, answered before anything was built on top of it.
+
+**The direct answer: no component is materially negative after calibration.** The
+-0.116 and -0.764 figures reported for comp1 and comp2 in the Milestone 4 summary
+were **raw** skill, taken from the "Skill score, raw" column of section 4. That
+summary did not say so, which was ambiguous; the corrected statement is below.
+
+### Method
+
+Isotonic fitted on all of validation and measured on the same rows is in-sample
+and flatters itself. This is cross-fitted instead: validation is cut into five
+contiguous time blocks, and each block is scored by a calibrator fitted on the
+other four. Every row gets an out-of-fold probability, so the skill below is a
+held-out estimate of the shipped calibrator. Blocks are contiguous rather than
+random because adjacent hours are near-identical (`docs/DATA.md` section 5.2) and
+a random fold would let the calibrator see a row's own neighbours.
+
+The test split was not used. It is locked, has been read twice, and this is a
+diagnostic on an already-final model.
+
+Reproduce with `make calibration-check` (`scripts/calibration_check.py`).
+
+### Result
+
+Brier skill: `1 - Brier / p(1-p)`. Zero is "no better than reporting the base
+rate". Intervals are bootstrap, resampled at the failure-event level.
+
+| Component | Base rate | Skill, raw | Skill, calibrated (held out) | 95% CI | Trusted |
+|---|---|---|---|---|---|
+| comp1 | 0.0254 | -0.1160 | **+0.0049** | (-0.1041, +0.0251) | no |
+| comp2 | 0.1491 | -0.7640 | **+0.0667** | (+0.0227, +0.0945) | **yes** |
+| comp3 | 0.0312 | +0.1408 | **+0.1540** | (-0.4086, +0.2650) | no |
+| comp4 | 0.0647 | +0.1148 | **+0.1203** | (-0.0318, +0.1983) | no |
+
+**Isotonic repairs the sign.** Raw skill was negative on comp1 and comp2; after
+calibration every component sits at or above zero. Nothing is materially
+negative, so the milestone's trigger for omitting a probability is not met.
+
+**But only comp2 is established as better than the base rate.** Three of the four
+intervals include zero. comp1's point estimate is +0.005 — indistinguishable from
+no skill at all — and comp3's interval runs from -0.409 to +0.265, which is a
+statement about how little validation data there is behind it, not a claim of
+quality.
+
+### What was implemented
+
+`ComponentRisk` gained four required fields:
+
+| Field | Meaning |
+|---|---|
+| `calibrated` | True only when held-out skill is positive **and** its interval excludes zero |
+| `brier_skill_holdout` | The measurement behind the flag |
+| `brier_skill_ci_low` / `_high` | Its interval, so the claim is checkable rather than asserted |
+
+The rule is deliberately stricter than the milestone's. "Materially negative"
+would have flagged nothing; "not established as better than the base rate" flags
+comp1, comp3 and comp4. A point estimate of +0.005 with an interval spanning zero
+is not a number a maintenance planner should act on as a likelihood, and the
+weaker rule would have let it through unmarked.
+
+The probability is **kept** rather than omitted, because it is not worse than the
+base rate — it is merely unproven — and the ranking still carries information
+(comp1's PR-AUC is 0.190 against a 0.054 floor on test). What changes is that the
+agent may no longer present it as a reliable likelihood. System prompt v1.1.0
+requires the flag to be surfaced in the same sentence as the number, and
+`tests/test_agent.py` asserts the flag matches the measurement, that at least one
+component is flagged either way, and that the prompt carries the rule.
+
+
 <!-- test-evaluation-appended-below -->
 
 ## 8. Test split, evaluated once
