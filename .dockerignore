@@ -1,0 +1,70 @@
+# There is no active Dockerfile -- the v1 one is archived under
+# archive/v1-app/Dockerfile. This file exists so that whatever image gets built
+# next starts from a correct exclusion list rather than an empty one.
+#
+# Docker build context is not gitignore: an image can happily embed a file git
+# never tracked. .env in particular is gitignored and has never been committed,
+# but a COPY . . would bake it into a layer that survives deletion.
+
+# ---- Secrets. Nothing below this heading may ever enter an image. ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_rsa.*
+*.crt
+.netrc
+.kaggle/
+kaggle.json
+.aws/
+.ssh/
+secrets/
+credentials.json
+service-account*.json
+
+# ---- Version control and developer state ----
+.git
+.gitignore
+.gitattributes
+.github/
+.devcontainer/
+.vscode/
+.idea/
+
+# ---- Python environments and caches ----
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# ---- Data. Fetched at runtime with `make fetch-data`, never baked in. ----
+data/raw/
+data/generated/
+*.db
+*.sqlite
+*.sqlite3
+*.parquet
+
+# ---- Experiment tracking and model artefacts ----
+mlruns/
+mlartifacts/
+models/
+
+# ---- The archived v1 application and its data ----
+archive/
+
+# ---- Local noise ----
+logs/
+*.log
+tmp/
+scratch/

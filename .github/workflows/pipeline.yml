@@ -1,53 +1,85 @@
-name: VULCAN Production Pipeline
+name: tests
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
-  test_and_build:
+  pytest:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'       # 🎯 FIXED: Forces the GitHub test runner to use Python 3.11
+          python-version: '3.12'
+          cache: pip
 
-      - name: Install Dependencies
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest
 
-      - name: Run Tests
+      # data/raw/ is gitignored and is not fetched here: fetching needs a Kaggle
+      # credential, and this workflow deliberately has access to no secrets. The
+      # tests that need the download skip themselves; everything built on
+      # tests/synthetic.py still runs. The gate below is what stops that from
+      # quietly becoming "nothing runs".
+      - name: Run tests
+        run: pytest --junitxml=report.xml
+
+      - name: Assert the suite actually executed
+        # A green pytest proves nothing on its own: with data/raw/ absent, a
+        # regression in tests/conftest.py that skipped every test would exit 0.
+        # This fails the build unless a real number of tests ran.
         env:
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
-          HUGGINGFACE_API_KEY: ${{ secrets.HUGGINGFACE_API_KEY }}
-          PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
-        run: pytest tests/
+          MIN_EXECUTED: '60'
+        run: |
+          python - <<'PY'
+          import os, sys, xml.etree.ElementTree as ET
 
-      - name: Log in to GitHub Container Registry
-        if: success()
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          minimum = int(os.environ["MIN_EXECUTED"])
+          root = ET.parse("report.xml").getroot()
+          suite = root if root.tag == "testsuite" else root.find("testsuite")
 
-      - name: Build and Push Docker Image
-        if: success()
-        uses: docker/build-push-action@v4
+          collected = int(suite.get("tests", 0))
+          skipped = int(suite.get("skipped", 0))
+          failures = int(suite.get("failures", 0))
+          errors = int(suite.get("errors", 0))
+          executed = collected - skipped
+
+          print(f"collected={collected} executed={executed} skipped={skipped} "
+                f"failures={failures} errors={errors}")
+
+          problems = []
+          if collected == 0:
+              problems.append("pytest collected no tests at all")
+          if executed < minimum:
+              problems.append(
+                  f"only {executed} tests executed, expected at least {minimum}; "
+                  "the data-independent suite is not running"
+              )
+          if failures or errors:
+              problems.append(f"{failures} failure(s), {errors} error(s)")
+
+          if problems:
+              for problem in problems:
+                  print(f"FAIL: {problem}", file=sys.stderr)
+              sys.exit(1)
+
+          print(f"OK: {executed} tests executed, at or above the floor of {minimum}")
+          PY
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          context: .
-          push: true
-          tags: ghcr.io/lomadadharmateja/vulcan-industrial-os:latest
+          name: pytest-report
+          path: report.xml
+          if-no-files-found: error

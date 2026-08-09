@@ -23,17 +23,43 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 RAW_DIR = REPO_ROOT / DEFAULT_RAW
 
 
+#: Fixtures that need the Kaggle download in `data/raw/`. A test requesting any
+#: of these -- directly or transitively -- cannot run without it.
+REAL_DATA_FIXTURES = frozenset(
+    {
+        "raw_dir",
+        "inventory_csv",
+        "built_db",
+        "conn",
+        "source_frames",
+        "corrupt_raw",
+        "real_store",
+        "real_subset_frames",
+    }
+)
+
+
 def pytest_collection_modifyitems(config, items):
-    """Skip the whole suite with one clear message if the raw data is absent."""
+    """Skip only the tests that actually need `data/raw/`.
+
+    This used to skip the entire suite, which made CI meaningless: the raw data
+    is gitignored, so a fresh checkout skipped all 158 tests and reported green
+    while executing nothing. Everything built on `tests/synthetic.py` is
+    independent of the download and must still run.
+
+    `item.fixturenames` is the transitive closure, so a test that reaches
+    `built_db` through `real_store` is caught without being listed.
+    """
     missing = [f for f, _ in SOURCE_SCHEMAS.values() if not (RAW_DIR / f).exists()]
     if not missing:
         return
     skip = pytest.mark.skip(
-        reason=f"raw data not present in {RAW_DIR} (missing: {', '.join(missing)}). "
-        "See docs/DATA.md section 1."
+        reason=f"needs raw data in {RAW_DIR} (missing: {', '.join(missing)}). "
+        "Run `make fetch-data`; see docs/DATA.md section 1."
     )
     for item in items:
-        item.add_marker(skip)
+        if REAL_DATA_FIXTURES & set(getattr(item, "fixturenames", ())):
+            item.add_marker(skip)
 
 
 @pytest.fixture(scope="session")
