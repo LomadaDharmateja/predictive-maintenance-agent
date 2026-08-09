@@ -6,15 +6,16 @@ venv/
 __pycache__/
 *.pyc
 
-# Build output of the data layer. 136 MB, and `make data` rebuilds it
-# deterministically from data/raw/, so there is nothing to gain by committing it.
-data/pdm.db
+# Source data. 77 MB for telemetry alone; committing it would roughly triple the
+# repository and could only be undone by rewriting history. Fetch and verify it
+# with `make fetch-data`, which checks every file against the SHA-256 constants
+# in scripts/fetch_data.py.
+data/raw/
 
-# 77 MB. Deliberately not committed: it would roughly triple the repository and
-# could only be removed again by rewriting history. Download it before running
-# `make data` -- docs/DATA.md section 1 has the source and a checksum.
-# The other four raw CSVs total 260 KB and are committed.
-data/raw/PdM_telemetry.csv
+# Build outputs of the data and feature layers. All are rebuilt deterministically
+# from data/raw/ by `make data` and `make features`.
+data/pdm.db
+data/generated/*.parquet
 
 # Test / tooling
 .pytest_cache/

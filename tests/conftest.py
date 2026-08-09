@@ -94,6 +94,77 @@ def source_frames(raw_dir) -> dict[str, pd.DataFrame]:
     }
 
 
+@pytest.fixture(scope="session")
+def real_store(built_db):
+    """FeatureStore over the whole shipped dataset. Built once; ~5 seconds."""
+    from src.features.store import FeatureStore
+
+    return FeatureStore.from_database(built_db)
+
+
+@pytest.fixture
+def real_subset_frames(built_db) -> dict[str, pd.DataFrame]:
+    """A slice of the real tables: 10 machines over two months.
+
+    Small enough that the leakage tests can rebuild the store per perturbation,
+    while keeping the properties a synthetic fixture would not reproduce -- real
+    gap distributions, simultaneous events, and maint history predating the
+    window. The telemetry slice stays a contiguous balanced panel, which
+    `FeatureStore` requires.
+
+    All `maint` rows for those machines are kept, including the pre-2015 records,
+    so `hours_since_*` is defined from the first hour of the slice.
+    """
+    import sqlite3
+
+    machines_wanted = tuple(range(1, 11))
+    start, end = "2015-03-01 00:00:00", "2015-05-01 00:00:00"
+    placeholders = ", ".join("?" * len(machines_wanted))
+
+    connection = sqlite3.connect(built_db)
+    try:
+        frames = {
+            "telemetry": pd.read_sql_query(
+                f"SELECT * FROM telemetry WHERE machineID IN ({placeholders}) "
+                "AND datetime BETWEEN ? AND ?",
+                connection,
+                params=(*machines_wanted, start, end),
+            ),
+            "errors": pd.read_sql_query(
+                f"SELECT * FROM errors WHERE machineID IN ({placeholders})",
+                connection,
+                params=machines_wanted,
+            ),
+            "maint": pd.read_sql_query(
+                f"SELECT * FROM maint WHERE machineID IN ({placeholders})",
+                connection,
+                params=machines_wanted,
+            ),
+            "failures": pd.read_sql_query(
+                f"SELECT * FROM failures WHERE machineID IN ({placeholders})",
+                connection,
+                params=machines_wanted,
+            ),
+            "machines": pd.read_sql_query(
+                f"SELECT * FROM machines WHERE machineID IN ({placeholders})",
+                connection,
+                params=machines_wanted,
+            ),
+        }
+    finally:
+        connection.close()
+
+    # SQLite hands back TEXT timestamps. Parsed here so a test can do timestamp
+    # arithmetic on them and so a perturbation appending a Timestamp does not
+    # leave the column holding a mixture of types.
+    for frame in frames.values():
+        if "datetime" in frame.columns:
+            frame["datetime"] = pd.to_datetime(
+                frame["datetime"], format="mixed"
+            ).dt.as_unit("ns")
+    return frames
+
+
 @pytest.fixture
 def corrupt_raw(tmp_path, raw_dir) -> Path:
     """A writable copy of the raw directory, for corruption tests.

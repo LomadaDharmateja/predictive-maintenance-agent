@@ -21,9 +21,22 @@ MANIFEST   := $(GENERATED)/build_manifest.json
 RAW_FILES := $(RAW)/PdM_telemetry.csv $(RAW)/PdM_errors.csv $(RAW)/PdM_maint.csv \
              $(RAW)/PdM_failures.csv $(RAW)/PdM_machines.csv
 
-.PHONY: all data inventory test verify investigate clean distclean help
+FEATURES        := $(GENERATED)/features_train.parquet
+FEATURE_SOURCES := src/features/config.py src/features/store.py \
+                   src/features/compute.py src/features/build.py
 
-all: data
+.PHONY: all data features inventory test verify investigate clean distclean help \
+        fetch-data fetch-data-verify
+
+all: features
+
+## fetch-data: download data/raw/ from Kaggle and verify every SHA-256
+fetch-data:
+	$(PYTHON) scripts/fetch_data.py --raw $(RAW)
+
+## fetch-data-verify: check data/raw/ against the committed checksums, download nothing
+fetch-data-verify:
+	$(PYTHON) scripts/fetch_data.py --raw $(RAW) --verify
 
 ## data: rebuild the database from scratch (inventory first, then ingest)
 data: $(DB)
@@ -31,6 +44,13 @@ data: $(DB)
 $(DB): $(RAW_FILES) $(INVENTORY) src/data/ingest.py src/data/schemas.py
 	$(PYTHON) -m src.data.ingest --raw $(RAW) --db $(DB) \
 		--inventory $(INVENTORY) --manifest $(MANIFEST)
+
+## features: build train/val/test feature matrices from the database
+features: $(FEATURES)
+
+$(FEATURES): $(DB) $(FEATURE_SOURCES)
+	$(PYTHON) -m src.features.build --db $(DB) --out $(GENERATED) \
+		--manifest $(MANIFEST)
 
 ## inventory: regenerate the seeded synthetic parts inventory
 inventory: $(INVENTORY)
@@ -53,6 +73,8 @@ investigate:
 ## clean: remove build outputs, keeping data/raw
 clean:
 	rm -f $(DB) $(INVENTORY) $(MANIFEST)
+	rm -f $(GENERATED)/features_train.parquet $(GENERATED)/features_val.parquet \
+	      $(GENERATED)/features_test.parquet
 	rm -rf .pytest_cache
 	find . -path ./venv -prune -o -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true
 

@@ -1,4 +1,78 @@
 {
+  "features": {
+    "test": {
+      "any_component_positive": 2590,
+      "any_component_positive_rate": 0.01820098383696416,
+      "first": "2015-11-01 00:00:00",
+      "last": "2015-12-30 06:00:00",
+      "machines": 100,
+      "path": "data/generated/features_test.parquet",
+      "positive_rate": {
+        "comp1": 0.004574841883345046,
+        "comp2": 0.007463106113843991,
+        "comp3": 0.0031201686577652845,
+        "comp4": 0.00409697821503865
+      },
+      "positives": {
+        "comp1": 651,
+        "comp2": 1062,
+        "comp3": 444,
+        "comp4": 583
+      },
+      "prediction_times": 1423,
+      "rows": 142300,
+      "sha256": "829fe9a4e858154e2393e12f9566ce760841f63d462a95317564a70fd393fa78",
+      "split": "test"
+    },
+    "train": {
+      "any_component_positive": 13074,
+      "any_component_positive_rate": 0.020045998160073596,
+      "first": "2015-01-01 06:00:00",
+      "last": "2015-09-29 23:00:00",
+      "machines": 100,
+      "path": "data/generated/features_train.parquet",
+      "positive_rate": {
+        "comp1": 0.0055887764489420426,
+        "comp2": 0.00686752529898804,
+        "comp3": 0.003767249310027599,
+        "comp4": 0.005064397424103036
+      },
+      "positives": {
+        "comp1": 3645,
+        "comp2": 4479,
+        "comp3": 2457,
+        "comp4": 3303
+      },
+      "prediction_times": 6522,
+      "rows": 652200,
+      "sha256": "d691e124a3fa8be093b47e9fa650a18fab5b5950878de7ae6ae41d231e9f22a4",
+      "split": "train"
+    },
+    "val": {
+      "any_component_positive": 1296,
+      "any_component_positive_rate": 0.018,
+      "first": "2015-10-01 00:00:00",
+      "last": "2015-10-30 23:00:00",
+      "machines": 100,
+      "path": "data/generated/features_val.parquet",
+      "positive_rate": {
+        "comp1": 0.0026666666666666666,
+        "comp2": 0.008666666666666666,
+        "comp3": 0.0025833333333333333,
+        "comp4": 0.004666666666666667
+      },
+      "positives": {
+        "comp1": 192,
+        "comp2": 624,
+        "comp3": 186,
+        "comp4": 336
+      },
+      "prediction_times": 720,
+      "rows": 72000,
+      "sha256": "51e86b310e9f3998ab88f70c097ea4dab52cd20909b0f837ebbae2d33abff829",
+      "split": "val"
+    }
+  },
   "schema_version": 1,
   "tables": {
     "errors": {

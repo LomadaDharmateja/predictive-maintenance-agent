@@ -1,10 +1,21 @@
-# Data layer only. Every entry below is imported by code in this repository;
-# nothing here is aspirational. Regenerate this file when imports change --
-# do not append to it.
+# Data and feature layers. Every entry is either imported by code in this
+# repository or required at runtime by something that is; nothing here is
+# aspirational. Regenerate this file when imports change -- do not append to it.
 #
 # Runtime
+numpy==2.5.1
 pandas==3.0.5
 pandera==0.32.1
+
+# Parquet engine for pandas.to_parquet / read_parquet in src/features/build.py.
+# Not imported by name: pandas declares it only as an optional extra, so it has
+# to be pinned here or `make features` fails at the write step.
+pyarrow==25.0.0
+
+# Kaggle download in scripts/fetch_data.py. Imported lazily inside the download
+# function so that `--verify` works without it, and so importing the module does
+# not emit the library's authentication banner.
+kaggle==2.2.4
 
 # Test
 pytest==9.1.1

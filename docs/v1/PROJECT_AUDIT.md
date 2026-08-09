@@ -1,3 +1,5 @@
+> **This document describes the archived v1 of this project (`archive/v1-app/`, `archive/v1-data/`). It is a historical record and does not describe the current codebase.**
+
 # PROJECT_AUDIT.md
 
 Forensic audit of the `industrial-ai-agent` repository (branch `main`, HEAD `cd0149b`).

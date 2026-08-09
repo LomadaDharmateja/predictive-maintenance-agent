@@ -1,4 +1,51 @@
 git repository [https://github.com/LomadaDharmateja/vulcan-industrial-os]
+
+## Getting the data
+
+The five Azure PdM source files are not committed. `PdM_telemetry.csv` alone is 77 MB,
+and git history cannot be trimmed back afterwards without a rewrite. Fetch them
+instead:
+
+```
+make fetch-data          # download into data/raw/ and verify every checksum
+make fetch-data-verify   # verify what is already on disk; downloads nothing
+```
+
+Each file is checked against a SHA-256 recorded in `scripts/fetch_data.py`. A
+truncated download or a silently re-uploaded upstream dataset fails here rather than
+surfacing later as an unexplained change in a measurement.
+
+### Kaggle credentials
+
+The download needs a Kaggle account. `scripts/fetch_data.py` never reads, stores, logs
+or prints a credential — it hands authentication to the `kaggle` library, which
+resolves it itself. Set it up one of these ways, in the shell, not in this repository:
+
+| Method | How |
+|---|---|
+| OAuth (recommended) | `kaggle auth login` — opens a browser, caches a token outside the repo |
+| Token in the environment | Generate a token at <https://www.kaggle.com/settings/api>, then `export KAGGLE_API_TOKEN=...` |
+| Token file | Save the same token to `~/.kaggle/access_token` |
+| Legacy key pair | `~/.kaggle/kaggle.json`, or `KAGGLE_USERNAME` and `KAGGLE_KEY` |
+
+Never commit a token, and never place one inside this repository. `.env` is gitignored,
+but nothing in this project reads Kaggle credentials from it, so putting one there
+would give you a secret on disk and no working download.
+
+If you would rather not use the API at all, download the archive by hand from
+<https://www.kaggle.com/datasets/arnabbiswas1/microsoft-azure-predictive-maintenance>,
+unzip the five `PdM_*.csv` files into `data/raw/`, and run `make fetch-data-verify` to
+confirm they are the expected ones.
+
+See `docs/DATA.md` for what the data contains and its limitations.
+
+---
+
+> **Everything below this line describes the archived v1 of this project
+> (`archive/v1-app/`, `archive/v1-data/`) and does not describe the current codebase.
+> Several of its claims were contradicted by measurement; see
+> `docs/v1/PROJECT_AUDIT.md` section 11.**
+
 ## 🧠 System Architecture & Operational Logic
 
 VULCAN operates as an **Agentic Loop**, meaning it doesn't just follow a script; it observes a problem, selects the right tool, and reasons through a solution[cite: 3].

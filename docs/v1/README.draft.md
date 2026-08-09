@@ -1,3 +1,5 @@
+> **This document describes the archived v1 of this project (`archive/v1-app/`, `archive/v1-data/`). It is a historical record and does not describe the current codebase.**
+
 # Industrial AI Agent — engineering design document
 
 > Draft. Replaces the claims in the repository's current `README.md`, which contains statements that

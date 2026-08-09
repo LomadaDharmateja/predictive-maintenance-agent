@@ -26,18 +26,22 @@ It is not part of the source dataset. See section 6.
 
 ### Getting the files
 
-Four of the five source files are committed under `data/raw/` (260 KB in total).
-`PdM_telemetry.csv` is not: at 77 MB it would roughly triple the repository, and
-history is not something you can trim back afterwards without a rewrite. Download it
-from the Kaggle link above and place it at `data/raw/PdM_telemetry.csv` before running
-`make data`:
+None of the five source files are committed. `PdM_telemetry.csv` alone is 77 MB, and
+git history cannot be trimmed back afterwards without a rewrite. `data/raw/` is
+gitignored; fetch it with `make fetch-data`, which downloads from the Kaggle link
+above and verifies each file against a SHA-256 committed in `scripts/fetch_data.py`.
+Kaggle credential setup is documented in README.md; no credential is read, stored or
+printed by anything in this repository.
 
-```
-size    80,142,329 bytes
-sha256  d957f3c45bb83416b716600da8cffd72f4b6961db89867d9696ad19f7cb1bd4e
-```
+| File | Bytes | SHA-256 |
+|---|---|---|
+| `PdM_telemetry.csv` | 80,142,329 | `d957f3c45bb83416b716600da8cffd72f4b6961db89867d9696ad19f7cb1bd4e` |
+| `PdM_errors.csv` | 129,077 | `9c2a2a010ad77227e2bb0c94e7971bca78810790ddd1f28a8bee4f12c2f62370` |
+| `PdM_maint.csv` | 104,903 | `481ed4e155f609e6ca6130754d2c035453093902a507cce5b3f3e235995f1db6` |
+| `PdM_failures.csv` | 24,336 | `0c6c31a4fd52ef2df95ad7c44e8b0c8c32917bcef29ba5a1ba3ba45531ded3b7` |
+| `PdM_machines.csv` | 1,582 | `5e8e1571c4999bf88abb7cae3925964c218d946fe851a9a100bb3d19330652bc` |
 
-Until it is present, `make data` aborts with a message naming the missing path, and
+Until they are present, `make data` aborts with a message naming the missing path, and
 `pytest` skips the whole suite with the same explanation rather than reporting green
 against absent data.
 
@@ -127,8 +131,22 @@ This is modelled as **four independent binary problems**, one per component, rat
 than a single multiclass problem — the downstream agent needs a per-component
 probability in order to decide which part to reserve.
 
-Approximate positive rates under this labelling: ~2.1% overall; comp2 ~0.71%,
-comp1 ~0.53%, comp4 ~0.49%, comp3 ~0.36%. Still severely imbalanced.
+Positive rates under this labelling, **measured** over the 866,500 rows of the
+modelling set (`make features`), no longer derived:
+
+| Component | Positive rows | Rate |
+|---|---|---|
+| comp2 | 6,165 | 0.711% |
+| comp1 | 4,488 | 0.518% |
+| comp4 | 4,222 | 0.487% |
+| comp3 | 3,087 | 0.356% |
+| **any component** | **16,960** | **1.957%** |
+
+Still severely imbalanced. Per-component figures confirm the earlier estimates of
+0.71 / 0.53 / 0.49 / 0.36%. The earlier "~2.1% overall" did not: 2.072% is the *sum*
+of the four rates, and the share of rows with any positive label is lower, at 1.957%,
+because failures of different components sometimes fall in the same 24-hour window.
+Per-split figures are in `docs/FEATURES.md`.
 
 Cost assumption. A missed failure is treated as 10x the cost of a false alarm: a missed failure means unplanned downtime and an emergency part order, while a false alarm costs one unnecessary part and one technician visit. This ratio is an assumption, not a measurement, and it is the basis for threshold selection in place of an arbitrary 0.5 cutoff.
 
@@ -144,14 +162,28 @@ Cost assumption. A missed failure is treated as 10x the cost of a false alarm: a
 This is causally correct: a failure triggers an unscheduled component replacement,
 logged at the same timestamp. It is not a data error. It is a leakage trap.
 
-**Rule:** any feature derived from `maint` at prediction time `t` must be computed
-only from records with `datetime < t`. Strictly less than, never `<=`. A
-"days since last replacement" feature built without this constraint collapses to zero
-at the exact moment of failure and hands the model the label.
+**Rule:**
 
-This constraint is to be enforced by test, not by convention.
-`tests/test_no_future_leakage.py` does not exist yet — it belongs with the feature
-layer, which has not been built. Until it does, this rule is convention.
+> **No feature may use any record with `datetime > t`.**
+
+The boundary is closed at `t`. A record stamped exactly `t` is available; anything
+after it is not.
+
+*This supersedes an earlier version of this rule that said `datetime < t`, "strictly
+less than, never `<=`". That was wrong, and wrong in the direction that quietly
+destroys signal.* The label for prediction time `t` covers `(t, t + 24h]`. Every
+failure in that window has `datetime > t`, so its coincident `maint` record — the
+leak the rule exists to block — is already excluded by `datetime > t`. A `maint`
+record at exactly `t` is a replacement that has already happened and that a real
+operator would already know about. Excluding it, along with the telemetry reading at
+`t`, discards real observed signal and buys nothing.
+
+The failure mode the original rule was reaching for is still real: a "time since last
+replacement" feature that admits records after `t` collapses to zero at the moment of
+failure and hands the model its own label.
+
+This constraint is enforced by test, not by convention:
+`tests/test_no_future_leakage.py`.
 
 #### The 18 failure records with no `maint` match
 
@@ -215,17 +247,23 @@ places near-duplicate rows on both sides of the boundary and inflates every metr
 **Rule:** splits are temporal. Random row splits are not used anywhere in this
 project.
 
-| Split | Period |
-|---|---|
-| Train | 2015-01 to 2015-09 |
-| Validation | 2015-10 |
-| Test | 2015-11 to 2015-12 |
+| Split | Period | Prediction times | Rows |
+|---|---|---|---|
+| Train | 2015-01-01 to 2015-09-30 | 6,522 | 652,200 |
+| Validation | 2015-10-01 to 2015-10-31 | 720 | 72,000 |
+| Test | 2015-11-01 to 2015-12-31 | 1,423 | 142,300 |
+
+A 24-hour embargo — the label horizon — is dropped from the end of each split, so no
+row's label window reaches into the next one. Implemented in
+`src/features/config.py` as a quantity derived from the horizon, and asserted in
+`tests/test_no_future_leakage.py`. Feature windows reaching *backwards* across a split
+boundary are permitted and correct; see `docs/FEATURES.md`.
 
 Cross-validation within train uses rolling origin, not k-fold.
 
-**Consequence, stated honestly:** the test period contains roughly 127 failure events.
-Recall estimated on this set carries substantial uncertainty and is reported with a
-confidence interval, not as a point estimate.
+**Consequence, stated honestly:** the test period contains roughly 127 failure events,
+which produce 2,590 positive rows. Recall estimated on this set carries substantial
+uncertainty and is reported with a confidence interval, not as a point estimate.
 
 A secondary evaluation holds out machines rather than time, to measure generalisation
 to unseen units. Given that two machines never fail, holdout composition is checked
@@ -288,9 +326,11 @@ study. `docs/LEAKAGE_CASE_STUDY.md` has not been written yet.
 ## 8. Building the database
 
 ```
-make data      # generate the inventory, then rebuild data/pdm.db from data/raw/
-make test      # pytest
-make verify    # profile the raw files without building anything
+make fetch-data   # download data/raw/ from Kaggle and verify every SHA-256
+make data         # generate the inventory, then rebuild data/pdm.db from data/raw/
+make features     # build the train/val/test matrices; see docs/FEATURES.md
+make test         # pytest
+make verify       # profile the raw files without building anything
 make investigate  # reproduce the section 5.1 analysis
 ```
 
