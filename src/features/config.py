@@ -47,6 +47,18 @@ MAX_PREDICTION_TIME = LAST_OBSERVED_FAILURE - LABEL_HORIZON  # 2015-12-30 06:00
 # Features
 # --------------------------------------------------------------------------
 
+#: The model that ships. Logistic regression, not LightGBM.
+#:
+#: Decided on validation, never on test -- choosing between trained models by
+#: their test scores is a modelling decision taken on the test split, which
+#: docs/MILESTONE_3.md section 0 forbids. Paired bootstrap on the PR-AUC
+#: difference spans zero on all four components; so does the paired difference in
+#: out-of-sample calibrated Brier skill. Neither model is established as better.
+#: Logistic regression is 6-10x faster and 464x smaller (14 KB against 6.7 MB),
+#: and its coefficients can be read. Simplicity breaks the tie.
+#: See docs/EVALUATION.md section 9.
+PRODUCTION_FAMILY = "logreg"
+
 SENSORS = ["volt", "rotate", "pressure", "vibration"]
 COMPONENTS = ["comp1", "comp2", "comp3", "comp4"]
 ERROR_IDS = ["error1", "error2", "error3", "error4", "error5"]

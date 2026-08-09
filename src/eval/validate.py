@@ -41,7 +41,12 @@ from src.eval.thresholds import (
     select_threshold,
     sensitivity_table,
 )
-from src.features.config import COMPONENTS, FEATURE_COLUMNS, LABEL_HORIZON
+from src.features.config import (
+    COMPONENTS,
+    FEATURE_COLUMNS,
+    LABEL_HORIZON,
+    PRODUCTION_FAMILY,
+)
 
 MODELS_DIR = Path("models")
 DB = Path("data/pdm.db")
@@ -104,7 +109,8 @@ def evaluate(models_dir: Path = MODELS_DIR, quiet: bool = False) -> dict:
     say(f"validation rows: {len(frame):,}")
 
     results: dict = {"components": {}, "n_bootstrap": N_BOOTSTRAP,
-                     "cost_ratio": DEFAULT_COST_RATIO}
+                     "cost_ratio": DEFAULT_COST_RATIO,
+                     "production_family": PRODUCTION_FAMILY}
     calibrators: dict = {}
 
     for component in COMPONENTS:
@@ -151,7 +157,9 @@ def evaluate(models_dir: Path = MODELS_DIR, quiet: bool = False) -> dict:
             )
 
         # -- thresholds from the cost assumption --------------------------
-        primary = scores["lgbm"]
+        # The production family, not whichever model scores best. Thresholds
+        # and calibrators have to belong to the model that actually ships.
+        primary = scores[PRODUCTION_FAMILY]
         record["thresholds"] = {
             f"{ratio:g}": vars(choice)
             for ratio, choice in zip(
@@ -169,7 +177,7 @@ def evaluate(models_dir: Path = MODELS_DIR, quiet: bool = False) -> dict:
         plots.cost_curves(curves, chosen, component)
 
         # -- calibration ---------------------------------------------------
-        before = calib.assess(y, primary, component, "lgbm (raw)")
+        before = calib.assess(y, primary, component, f"{PRODUCTION_FAMILY} (raw)")
         isotonic = calib.fit_isotonic(y, primary)
         platt = calib.fit_platt(y, primary)
         after_iso = calib.assess(
@@ -195,7 +203,7 @@ def evaluate(models_dir: Path = MODELS_DIR, quiet: bool = False) -> dict:
         plots.reliability_curves([before, after_iso, after_platt], component)
 
         # -- permutation importance ----------------------------------------
-        bundle = load_model(component, "lgbm", models_dir)
+        bundle = load_model(component, PRODUCTION_FAMILY, models_dir)
         X, _ = xy(frame, component)
         importances = permutation_importance(bundle["model"], X, y)
         record["importance"] = [

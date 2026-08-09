@@ -1,4 +1,52 @@
+# Industrial AI agent — predictive maintenance planning
+
 git repository [https://github.com/LomadaDharmateja/vulcan-industrial-os]
+
+## What this system is for
+
+> **Flag elevated component risk over a 14-day window so maintenance attention can be
+> scheduled, and manage parts from stock levels and consumption rates rather than from
+> predictions.**
+
+**This replaces the original predict-and-order framing.** The change was forced by
+measurement.
+
+The project was built to predict a failure and then order the replacement part. That
+cannot work on this data. The model's effective detection lead — the gap between its
+score crossing the operating threshold and the failure — is a median of about 14 days
+for comp2, comp3 and comp4, and about 24 hours for comp1. Supplier lead times run 10 to
+34 days, median 23. Crossing the two lists, **1 of 9 parts can be ordered in time.**
+
+Extending the horizon does not rescue it. Predictability caps the horizon at 14 days;
+beyond that the model's bootstrap interval overlaps a matched-error-code baseline's and
+it is no longer established as better than a spreadsheet rule. The lead-time
+requirement starts at 23 days. The two constraints do not intersect, and no horizon
+satisfies both. Derivation in [`docs/SIGNAL_ANALYSIS.md`](docs/SIGNAL_ANALYSIS.md)
+section 4.
+
+So the system does two separate things, and keeping them separate is the design:
+
+| It does | It does not |
+|---|---|
+| Flag which component on which machine is at elevated risk over 14 days, as a calibrated probability with a confidence interval | Say when inside that window, or how severe |
+| State whether its warning is long enough to act on, per component and per part | Recommend ordering a part on the strength of a prediction |
+| Report parts position from stock on hand and observed consumption | Derive a reorder decision from a risk score |
+
+The agent layer expresses that separation in the type system: `get_parts_position`
+accepts no risk score and has no import path to the model, asserted by walking the
+import graph in `tests/test_agent_parts_independence.py`.
+
+### Where the detail lives
+
+| Document | Contents |
+|---|---|
+| [`docs/DATA.md`](docs/DATA.md) | Dataset, schema, leakage risks, the horizon decision |
+| [`docs/FEATURES.md`](docs/FEATURES.md) | The 38 features, the labels, the splits |
+| [`docs/SIGNAL_ANALYSIS.md`](docs/SIGNAL_ANALYSIS.md) | Fault-signature lead times, horizon sweep, the negative result |
+| [`docs/EVALUATION.md`](docs/EVALUATION.md) | Baselines, metrics, calibration, thresholds, which model ships |
+| [`docs/EVALUATION_24h.md`](docs/EVALUATION_24h.md) | The archived 24-hour evaluation and why it was useless |
+| [`docs/leakage-case-study.md`](docs/leakage-case-study.md) | What v1 got wrong, recomputed from the archived code |
+
 
 ## Getting the data
 

@@ -96,7 +96,7 @@ def _calibration_table(results: dict) -> list[str]:
     ]
     for component in COMPONENTS:
         cal = results["components"][component]["calibration"]
-        raw = cal["lgbm (raw)"]
+        raw = cal[next(k for k in cal if k.endswith("(raw)"))]
         lines.append(
             f"| {component} | {raw['brier']:.6f} | {cal['isotonic']['brier']:.6f} "
             f"| {cal['Platt']['brier']:.6f} | {raw['brier_base_rate']:.6f} "
@@ -469,6 +469,118 @@ def write_validation_report(results: dict, path: Path) -> None:
     add("  life, not severity, not which part to order. The parts inventory it would")
     add("  need for that is synthetic (`docs/DATA.md` section 6).")
     add("")
+    # ---------------------------------------------------------------- 9
+    import json as _json
+    from pathlib import Path as _Path
+
+    comparison_path = _Path("data/generated/model_comparison.json")
+    calibration_path = _Path("data/generated/calibration_comparison.json")
+    if comparison_path.exists():
+        comparison = _json.loads(comparison_path.read_text(encoding="utf-8"))
+        add("---")
+        add("")
+        add("## 9. Which model ships, and why it is the simpler one")
+        add("")
+        add("**Logistic regression.** Not because it scores better -- it does not --")
+        add("but because LightGBM is not established as better, and simplicity breaks")
+        add("a tie.")
+        add("")
+        add("**The decision was made on validation, never on test.** Choosing between")
+        add("two trained models on the strength of their test scores is a modelling")
+        add("decision taken on the test split, which section 0 of `docs/MILESTONE_3.md`")
+        add("forbids. The test figures in section 8 are quoted below as corroboration;")
+        add("they were already published, and the split was not re-opened to produce")
+        add("them. The run count in `build_manifest.json` is still 2.")
+        add("")
+        add("### Ranking: paired bootstrap on the PR-AUC difference")
+        add("")
+        add("Comparing two overlapping marginal intervals is a weak test. Resampling")
+        add("the same clusters for both models and taking the difference each time is")
+        add("the right comparison, and it is what decides the question.")
+        add("")
+        add("| Component | LightGBM | Logistic regression | Difference | 95% CI | Establishes |")
+        add("|---|---|---|---|---|---|")
+        for component in COMPONENTS:
+            record = comparison["components"][component]
+            diff = record["paired_difference_lgbm_minus_logreg"]
+            add(
+                f"| {component} | {record['pr_auc']['lgbm']:.3f} "
+                f"| {record['pr_auc']['logreg']:.3f} "
+                f"| {diff['mean_difference']:+.3f} "
+                f"| ({diff['ci_low']:+.3f}, {diff['ci_high']:+.3f}) "
+                f"| {diff['favours']} |"
+            )
+        add("")
+        add("Every interval spans zero. On test, section 8 shows the same picture:")
+        add("0.190 against 0.193 on comp1, 0.377 against 0.375 on comp3, with fully")
+        add("overlapping intervals throughout.")
+        add("")
+        if calibration_path.exists():
+            calibration = _json.loads(calibration_path.read_text(encoding="utf-8"))
+            add("### Calibration, measured out of sample")
+            add("")
+            add("In-sample, LightGBM looked far better calibrated -- Brier skill 0.248")
+            add("against 0.023 on comp1. That advantage was the isotonic calibrator")
+            add("overfitting LightGBM's finer-grained scores. Refitting the calibrator on")
+            add("the first two thirds of validation and scoring the last third removes it:")
+            add("")
+            add("| Component | LightGBM skill | Logistic regression skill | Difference | 95% CI | Establishes |")
+            add("|---|---|---|---|---|---|")
+            for component in COMPONENTS:
+                record = calibration[component]
+                add(
+                    f"| {component} | {record['skill_lgbm']:+.4f} "
+                    f"| {record['skill_logreg']:+.4f} "
+                    f"| {record['diff']:+.4f} "
+                    f"| ({record['ci'][0]:+.4f}, {record['ci'][1]:+.4f}) "
+                    f"| {record['favours']} |"
+                )
+            add("")
+            add("Two components each way, every interval spanning zero.")
+            add("")
+        add("### Cost of the two")
+        add("")
+        add("| | LightGBM | Logistic regression | Ratio |")
+        add("|---|---|---|---|")
+        lat_lgbm = sum(
+            comparison["components"][c]["latency"]["lgbm"]["median_ms_per_1000_rows"]
+            for c in COMPONENTS
+        ) / len(COMPONENTS)
+        lat_lr = sum(
+            comparison["components"][c]["latency"]["logreg"]["median_ms_per_1000_rows"]
+            for c in COMPONENTS
+        ) / len(COMPONENTS)
+        size_lgbm = comparison["artefacts"]["lgbm"]["bytes_total"]
+        size_lr = comparison["artefacts"]["logreg"]["bytes_total"]
+        add(
+            f"| Inference, ms per 1,000 rows | {lat_lgbm:.2f} | {lat_lr:.2f} "
+            f"| {lat_lgbm / lat_lr:.1f}x |"
+        )
+        add(
+            f"| Artefact size, four components | {size_lgbm:,} B | {size_lr:,} B "
+            f"| {size_lgbm / size_lr:.0f}x |"
+        )
+        add("")
+        add("### The decision")
+        add("")
+        add("Neither model is established as better at ranking or at calibrated")
+        add("probability. Logistic regression is an order of magnitude faster, 464 times")
+        add("smaller, and its coefficients can be read and argued with -- which matters")
+        add("for a system whose whole point is being defensible about what it cannot do.")
+        add("Simplicity wins the tie. `PRODUCTION_FAMILY = \"logreg\"` in")
+        add("`src/features/config.py`; thresholds and calibrators are refitted on it.")
+        add("")
+        add("**The residual risk, recorded.** comp4 is the strongest case against this")
+        add("choice: LightGBM leads by +0.096 PR-AUC and +0.146 calibrated skill there,")
+        add("with intervals that only just include zero. If comp4 turns out to matter")
+        add("more than the others, that is the component to revisit first.")
+        add("")
+        add("**One consequence to carry forward.** On logistic regression the raw Brier")
+        add("skill is negative for comp1 (-0.116) and comp2 (-0.764), where on LightGBM")
+        add("it was comp1 and comp3. The components change; the constraint does not.")
+        add("Raw scores are not probabilities and no tool may expose one.")
+        add("")
+
     add(TEST_SECTION_MARKER)
     add("")
 

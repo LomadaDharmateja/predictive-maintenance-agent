@@ -191,10 +191,10 @@ scores about 0.004, which reflects rarity rather than skill.
 
 | Component | Brier, raw | Brier, isotonic | Brier, Platt | Base-rate reference | Skill score, raw |
 |---|---|---|---|---|---|
-| comp1 | 0.031459 | 0.018651 | 0.021205 | 0.024794 | -0.2688 |
-| comp2 | 0.117672 | 0.106573 | 0.115419 | 0.126882 | 0.0726 |
-| comp3 | 0.035202 | 0.020086 | 0.023175 | 0.030204 | -0.1654 |
-| comp4 | 0.056531 | 0.042969 | 0.053920 | 0.060519 | 0.0659 |
+| comp1 | 0.027670 | 0.024227 | 0.024499 | 0.024794 | -0.1160 |
+| comp2 | 0.223817 | 0.116784 | 0.120538 | 0.126882 | -0.7640 |
+| comp3 | 0.025951 | 0.024484 | 0.026434 | 0.030204 | 0.1408 |
+| comp4 | 0.053572 | 0.051131 | 0.055189 | 0.060519 | 0.1148 |
 
 **Two of the four raw models are worse than useless as probabilities.** The
 Brier skill score is negative for comp1 and comp3: their raw scores carry more
@@ -243,10 +243,10 @@ Sensitivity of the chosen threshold to the assumed ratio:
 
 | Component | 3:1 threshold | 3:1 recall | 3:1 precision | 10:1 threshold | 10:1 recall | 10:1 precision | 30:1 threshold | 30:1 recall | 30:1 precision |
 |---|---|---|---|---|---|---|---|---|---|
-| comp1 | 0.8800 | 0.307 | 0.628 | 0.8800 | 0.307 | 0.628 | 0.0005 | 1.000 | 0.051 |
-| comp2 | 0.3230 | 0.216 | 0.508 | 0.0060 | 0.999 | 0.221 | 0.0050 | 1.000 | 0.220 |
-| comp3 | 0.8700 | 0.522 | 0.530 | 0.0015 | 0.999 | 0.212 | 0.0010 | 1.000 | 0.211 |
-| comp4 | 0.2118 | 0.619 | 0.405 | 0.0185 | 0.969 | 0.282 | 0.0015 | 1.000 | 0.260 |
+| comp1 | 0.3382 | 0.082 | 0.269 | 0.3079 | 0.090 | 0.258 | 0.2775 | 0.095 | 0.226 |
+| comp2 | 0.8000 | 0.079 | 0.755 | 0.3938 | 0.893 | 0.176 | 0.1461 | 1.000 | 0.149 |
+| comp3 | 0.3129 | 0.301 | 0.420 | 0.1258 | 0.765 | 0.186 | 0.0601 | 0.987 | 0.105 |
+| comp4 | 0.2927 | 0.209 | 0.393 | 0.0450 | 0.956 | 0.157 | 0.0365 | 0.991 | 0.148 |
 
 Thresholds differ by component. That is expected: the components have
 different base rates and different score distributions, so the point where one
@@ -298,61 +298,61 @@ the sample.
 
 | Rank | Feature | Mean PR-AUC drop | 95% interval |
 |---|---|---|---|
-| 1 | `hours_since_comp1` | 0.25207 | 0.24621 to 0.25794 |
-| 2 | `hours_since_comp4` | 0.21115 | 0.20655 to 0.21575 |
-| 3 | `age` | 0.17014 | 0.16731 to 0.17297 |
-| 4 | `hours_since_comp3` | 0.13688 | 0.13340 to 0.14037 |
-| 5 | `hours_since_comp2` | 0.11102 | 0.10783 to 0.11421 |
-| 6 | `volt_mean_24h` | 0.08776 | 0.08530 to 0.09022 |
-| 7 | `error1_count_24h` | 0.08372 | 0.08144 to 0.08600 |
-| 8 | `model_model4` | 0.05690 | 0.05436 to 0.05945 |
-| 9 | `volt_mean_3h` | 0.05615 | 0.05328 to 0.05902 |
-| 10 | `model_model3` | 0.04735 | 0.04292 to 0.05178 |
+| 1 | `error1_count_24h` | 0.02055 | 0.02021 to 0.02090 |
+| 2 | `volt_mean_24h` | 0.01992 | 0.01960 to 0.02024 |
+| 3 | `volt_mean_3h` | 0.00745 | 0.00721 to 0.00769 |
+| 4 | `hours_since_comp1` | 0.00230 | 0.00123 to 0.00338 |
+| 5 | `hours_since_comp4` | 0.00185 | 0.00126 to 0.00245 |
+| 6 | `age` | 0.00095 | 0.00091 to 0.00099 |
+| 7 | `vibration_mean_24h` | 0.00077 | 0.00056 to 0.00098 |
+| 8 | `error2_count_24h` | 0.00059 | 0.00044 to 0.00075 |
+| 9 | `hours_since_comp3` | 0.00046 | 0.00037 to 0.00054 |
+| 10 | `volt_std_24h` | 0.00034 | 0.00027 to 0.00041 |
 
 ### comp2
 
 | Rank | Feature | Mean PR-AUC drop | 95% interval |
 |---|---|---|---|
-| 1 | `hours_since_comp2` | 0.09681 | 0.09429 to 0.09933 |
-| 2 | `rotate_mean_24h` | 0.07321 | 0.07238 to 0.07404 |
-| 3 | `error3_count_24h` | 0.04990 | 0.04947 to 0.05033 |
-| 4 | `hours_since_comp1` | 0.04272 | 0.04135 to 0.04408 |
-| 5 | `age` | 0.03155 | 0.03058 to 0.03252 |
-| 6 | `error2_count_24h` | 0.02908 | 0.02863 to 0.02953 |
-| 7 | `rotate_mean_3h` | 0.01724 | 0.01682 to 0.01765 |
-| 8 | `model_model4` | 0.01720 | 0.01662 to 0.01779 |
-| 9 | `hours_since_comp4` | 0.01474 | 0.01344 to 0.01604 |
-| 10 | `error2_count_7d` | 0.00861 | 0.00811 to 0.00911 |
+| 1 | `error3_count_24h` | 0.03310 | 0.03159 to 0.03461 |
+| 2 | `error2_count_24h` | 0.02843 | 0.02749 to 0.02936 |
+| 3 | `rotate_mean_24h` | 0.01368 | 0.01261 to 0.01475 |
+| 4 | `hours_since_comp2` | 0.01082 | 0.01004 to 0.01161 |
+| 5 | `hours_since_comp4` | 0.00814 | 0.00780 to 0.00847 |
+| 6 | `error2_count_7d` | 0.00810 | 0.00762 to 0.00858 |
+| 7 | `rotate_mean_3h` | 0.00697 | 0.00654 to 0.00741 |
+| 8 | `hours_since_comp1` | 0.00533 | 0.00508 to 0.00557 |
+| 9 | `rotate_std_24h` | 0.00460 | 0.00435 to 0.00486 |
+| 10 | `model_model2` | 0.00396 | 0.00374 to 0.00417 |
 
 ### comp3
 
 | Rank | Feature | Mean PR-AUC drop | 95% interval |
 |---|---|---|---|
-| 1 | `hours_since_comp3` | 0.18662 | 0.18007 to 0.19318 |
-| 2 | `model_model3` | 0.13454 | 0.12982 to 0.13926 |
-| 3 | `model_model4` | 0.12264 | 0.11695 to 0.12833 |
-| 4 | `pressure_mean_24h` | 0.09006 | 0.08849 to 0.09163 |
-| 5 | `model_model1` | 0.08685 | 0.08561 to 0.08808 |
-| 6 | `error4_count_24h` | 0.07032 | 0.06925 to 0.07140 |
-| 7 | `hours_since_comp4` | 0.04175 | 0.03870 to 0.04480 |
-| 8 | `pressure_mean_3h` | 0.02852 | 0.02806 to 0.02897 |
-| 9 | `age` | 0.02107 | 0.01755 to 0.02459 |
-| 10 | `error3_count_7d` | 0.00592 | 0.00573 to 0.00610 |
+| 1 | `model_model1` | 0.19646 | 0.19517 to 0.19775 |
+| 2 | `model_model2` | 0.13838 | 0.13495 to 0.14181 |
+| 3 | `hours_since_comp3` | 0.11971 | 0.11672 to 0.12270 |
+| 4 | `model_model3` | 0.07021 | 0.06525 to 0.07516 |
+| 5 | `model_model4` | 0.06428 | 0.05839 to 0.07017 |
+| 6 | `error4_count_24h` | 0.05371 | 0.05085 to 0.05657 |
+| 7 | `pressure_mean_24h` | 0.04664 | 0.04486 to 0.04842 |
+| 8 | `error4_count_7d` | 0.03387 | 0.03276 to 0.03499 |
+| 9 | `pressure_mean_3h` | 0.02978 | 0.02774 to 0.03181 |
+| 10 | `error2_count_7d` | 0.00933 | 0.00859 to 0.01006 |
 
 ### comp4
 
 | Rank | Feature | Mean PR-AUC drop | 95% interval |
 |---|---|---|---|
-| 1 | `age` | 0.23533 | 0.23257 to 0.23810 |
-| 2 | `hours_since_comp4` | 0.20703 | 0.20501 to 0.20905 |
-| 3 | `error5_count_24h` | 0.07264 | 0.07211 to 0.07316 |
-| 4 | `vibration_mean_24h` | 0.06917 | 0.06845 to 0.06989 |
-| 5 | `hours_since_comp2` | 0.04279 | 0.04055 to 0.04502 |
-| 6 | `vibration_mean_3h` | 0.03333 | 0.03293 to 0.03374 |
-| 7 | `hours_since_comp3` | 0.02858 | 0.02710 to 0.03006 |
-| 8 | `error1_count_7d` | 0.02668 | 0.02509 to 0.02827 |
-| 9 | `error4_count_7d` | 0.00757 | 0.00717 to 0.00797 |
-| 10 | `model_model3` | 0.00523 | 0.00424 to 0.00622 |
+| 1 | `age` | 0.13229 | 0.12968 to 0.13489 |
+| 2 | `error5_count_24h` | 0.07851 | 0.07756 to 0.07946 |
+| 3 | `hours_since_comp4` | 0.07370 | 0.07178 to 0.07562 |
+| 4 | `vibration_mean_24h` | 0.01904 | 0.01824 to 0.01983 |
+| 5 | `error5_count_7d` | 0.01687 | 0.01625 to 0.01750 |
+| 6 | `model_model1` | 0.01325 | 0.01278 to 0.01373 |
+| 7 | `error1_count_7d` | 0.01054 | 0.00972 to 0.01136 |
+| 8 | `hours_since_comp1` | 0.01023 | 0.01003 to 0.01043 |
+| 9 | `model_model4` | 0.00954 | 0.00927 to 0.00980 |
+| 10 | `vibration_mean_3h` | 0.00827 | 0.00772 to 0.00881 |
 
 ### Do the maintenance-recency features dominate?
 
@@ -416,6 +416,80 @@ negatives and will look excellent whether or not the model is useful.
 - **It predicts a 24-hour window, and nothing else.** Not remaining useful
   life, not severity, not which part to order. The parts inventory it would
   need for that is synthetic (`docs/DATA.md` section 6).
+
+---
+
+## 9. Which model ships, and why it is the simpler one
+
+**Logistic regression.** Not because it scores better -- it does not --
+but because LightGBM is not established as better, and simplicity breaks
+a tie.
+
+**The decision was made on validation, never on test.** Choosing between
+two trained models on the strength of their test scores is a modelling
+decision taken on the test split, which section 0 of `docs/MILESTONE_3.md`
+forbids. The test figures in section 8 are quoted below as corroboration;
+they were already published, and the split was not re-opened to produce
+them. The run count in `build_manifest.json` is still 2.
+
+### Ranking: paired bootstrap on the PR-AUC difference
+
+Comparing two overlapping marginal intervals is a weak test. Resampling
+the same clusters for both models and taking the difference each time is
+the right comparison, and it is what decides the question.
+
+| Component | LightGBM | Logistic regression | Difference | 95% CI | Establishes |
+|---|---|---|---|---|---|
+| comp1 | 0.335 | 0.052 | +0.263 | (-0.019, +0.673) | neither |
+| comp2 | 0.365 | 0.284 | +0.083 | (-0.010, +0.187) | neither |
+| comp3 | 0.380 | 0.305 | +0.074 | (-0.235, +0.312) | neither |
+| comp4 | 0.384 | 0.275 | +0.096 | (-0.101, +0.268) | neither |
+
+Every interval spans zero. On test, section 8 shows the same picture:
+0.190 against 0.193 on comp1, 0.377 against 0.375 on comp3, with fully
+overlapping intervals throughout.
+
+### Calibration, measured out of sample
+
+In-sample, LightGBM looked far better calibrated -- Brier skill 0.248
+against 0.023 on comp1. That advantage was the isotonic calibrator
+overfitting LightGBM's finer-grained scores. Refitting the calibrator on
+the first two thirds of validation and scoring the last third removes it:
+
+| Component | LightGBM skill | Logistic regression skill | Difference | 95% CI | Establishes |
+|---|---|---|---|---|---|
+| comp1 | -0.1211 | -0.0281 | -0.1704 | (-0.8935, +0.0332) | neither |
+| comp2 | +0.1933 | +0.1291 | +0.0592 | (-0.0284, +0.1244) | neither |
+| comp3 | +0.1624 | +0.2118 | -0.0329 | (-0.2642, +0.2012) | neither |
+| comp4 | +0.2695 | +0.1202 | +0.1463 | (-0.0338, +0.2833) | neither |
+
+Two components each way, every interval spanning zero.
+
+### Cost of the two
+
+| | LightGBM | Logistic regression | Ratio |
+|---|---|---|---|
+| Inference, ms per 1,000 rows | 3.76 | 0.44 | 8.5x |
+| Artefact size, four components | 6,689,588 B | 14,409 B | 464x |
+
+### The decision
+
+Neither model is established as better at ranking or at calibrated
+probability. Logistic regression is an order of magnitude faster, 464 times
+smaller, and its coefficients can be read and argued with -- which matters
+for a system whose whole point is being defensible about what it cannot do.
+Simplicity wins the tie. `PRODUCTION_FAMILY = "logreg"` in
+`src/features/config.py`; thresholds and calibrators are refitted on it.
+
+**The residual risk, recorded.** comp4 is the strongest case against this
+choice: LightGBM leads by +0.096 PR-AUC and +0.146 calibrated skill there,
+with intervals that only just include zero. If comp4 turns out to matter
+more than the others, that is the component to revisit first.
+
+**One consequence to carry forward.** On logistic regression the raw Brier
+skill is negative for comp1 (-0.116) and comp2 (-0.764), where on LightGBM
+it was comp1 and comp3. The components change; the constraint does not.
+Raw scores are not probabilities and no tool may expose one.
 
 <!-- test-evaluation-appended-below -->
 
