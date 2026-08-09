@@ -87,6 +87,26 @@ horizon-decision:
 signal-analysis:
 	$(PYTHON) scripts/signal_analysis.py
 
+## calibration-check: held-out Brier skill for the shipped model
+calibration-check:
+	$(PYTHON) scripts/calibration_check.py
+
+## eval-validate: check evals/scenarios.yaml against the required distribution
+eval-validate:
+	$(PYTHON) evals/validate_scenarios.py
+
+## eval: run the agent suite offline against recorded transcripts
+eval:
+	$(PYTHON) -m evals.runner
+
+## eval-report: render docs/AGENT_EVALUATION.md from the latest run
+eval-report:
+	$(PYTHON) -m evals.report
+
+## eval-diff: compare two runs (make eval-diff BEFORE=... AFTER=...)
+eval-diff:
+	$(PYTHON) -m evals.diff $(BEFORE) $(AFTER)
+
 ## case-study: reproduce the v1 leakage numbers from archive/v1-app/
 case-study:
 	$(PYTHON) scripts/leakage_case_study.py

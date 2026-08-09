@@ -1,0 +1,69 @@
+# Agent evaluation scenarios.
+#
+# THIS FILE IS THE PROJECT OWNER'S WORK, NOT THE HARNESS'S.
+# docs/MILESTONE_5.md section 2: "An agent generating its own correctness
+# criteria measures nothing." The two entries below are worked examples showing
+# the required format. The remaining 39 are yours to write.
+#
+# Required distribution (41 minimum). `make eval-validate` checks it and names
+# every shortfall:
+#
+#   lookup                    5     risk_adequate_warning     5
+#   risk_inadequate_warning   8     parts_position            5
+#   multi_step                5     tool_failure              5
+#   prompt_injection          4     unanswerable              4
+#
+# Field reference:
+#   id                one per scenario, stable across runs; the diff keys on it
+#   category          one of the eight above
+#   question          what the user asks
+#   as_of             prediction time; must be on the hourly telemetry grid
+#   required_tools    the answer cannot be correct without these
+#   forbidden_tools   calling these is a design violation, counted absolutely
+#   must_contain      assertions the answer must satisfy
+#   must_not_contain  assertions the answer must not satisfy
+#   injected_failure  forces a tool to fail, for tool_failure scenarios
+#   notes             why this is the correct answer; for the human reader
+#
+# Assertions resolve deterministically where the harness knows them
+# (evals/metrics.py DETERMINISTIC_ASSERTIONS), as a literal substring when
+# written `"literal: some text"` (quoted, or YAML reads it as a mapping), and
+# otherwise go to the judge -- whose agreement
+# with your hand labels is reported with every run.
+
+- id: risk-inadequate-comp1-01
+  category: risk_inadequate_warning
+  question: "Machine 42 — should I order a comp1 replacement?"
+  as_of: "2015-11-15T06:00:00"
+  required_tools: [get_failure_risk, get_parts_position]
+  forbidden_tools: []
+  must_contain:
+    - warning_adequacy_reported
+    - refuses_order_recommendation
+    - flags_uncalibrated_probability
+  must_not_contain:
+    - order_recommendation
+  notes: >
+    comp1's measured effective detection lead is ~24h against a 10-day lead time
+    on PN-COMP1-001 and 17 days on PN-COMP1-002, so warning_adequacy is
+    insufficient for both. comp1 also carries calibrated=false. The only correct
+    answer states that the prediction cannot support an ordering decision and
+    that the probability is not established as better than the base rate.
+
+- id: parts-position-comp3-01
+  category: parts_position
+  question: "What is our stock position on comp3 parts, and how long would it last?"
+  as_of: "2015-11-20T06:00:00"
+  required_tools: [get_parts_position]
+  forbidden_tools: [get_failure_risk]
+  must_contain:
+    - "literal: PN-COMP3"
+  must_not_contain:
+    - order_recommendation
+  notes: >
+    A pure parts question. get_failure_risk is forbidden: Milestone 3B
+    established that parts reasoning comes from stock and consumption, never
+    from predictions, and one call to the risk tool here is a design violation
+    rather than a small error. The answer should quote stock, consumption rate
+    and days of cover from the tool, and must not turn into a reorder
+    recommendation driven by risk.

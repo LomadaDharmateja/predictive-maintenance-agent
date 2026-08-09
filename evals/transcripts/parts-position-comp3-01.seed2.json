@@ -1,0 +1,19 @@
+{
+  "scenario_id": "parts-position-comp3-01",
+  "seed": 2,
+  "note": "Recorded transcript. Replayed offline; no network call is made.",
+  "turns": [
+    {
+      "tokens_in": 1420,
+      "tokens_out": 40,
+      "tool_calls": [
+        {"name": "get_parts_position", "arguments": {"component": "comp3"}}
+      ]
+    },
+    {
+      "tokens_in": 2200,
+      "tokens_out": 120,
+      "text": "Three comp3 parts are stocked. PN-COMP3-001 holds 5 units, PN-COMP3-002 holds 21 and PN-COMP3-003 holds 40. Against the observed replacement rate for comp3 those give the days of cover shown in the tool output.\n\nThis is drawn from stock on hand and the consumption rate observed in the replacement log, not from any failure prediction — on this data the model's warning is shorter than the supplier lead time for eight of the nine parts, so reordering has to be driven by cover rather than by risk."
+    }
+  ]
+}

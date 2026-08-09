@@ -299,5 +299,9 @@ class Agent:
                 status="ok",
                 truncated=truncated or getattr(result, "truncated", False),
                 duration_ms=elapsed,
+                # The rendered result, so an evaluation harness can check the
+                # answer's figures against what the model actually saw. Bounded
+                # by the same character budget the model received.
+                detail=rendered,
             )
             return rendered
