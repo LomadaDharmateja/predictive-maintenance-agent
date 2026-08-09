@@ -1,8 +1,8 @@
-# Data and feature layers. Every entry is either imported by code in this
-# repository or required at runtime by something that is; nothing here is
-# aspirational. Regenerate this file when imports change -- do not append to it.
+# Every entry is either imported by code in this repository or required at
+# runtime by something that is; nothing here is aspirational. Regenerate this
+# file when imports change -- do not append to it.
 #
-# Runtime
+# Data and feature layers
 numpy==2.5.1
 pandas==3.0.5
 pandera==0.32.1
@@ -11,6 +11,20 @@ pandera==0.32.1
 # Not imported by name: pandas declares it only as an optional extra, so it has
 # to be pinned here or `make features` fails at the write step.
 pyarrow==25.0.0
+
+# Modelling and evaluation
+scikit-learn==1.9.0
+lightgbm==4.7.0
+scipy==1.18.0
+joblib==1.5.3
+
+# Experiment tracking. MLflow 3.15 put the filesystem store into maintenance
+# mode, so the local backend is SQLite under mlruns/ -- see src/models/train.py.
+mlflow==3.15.1
+
+# PR, reliability and cost curves in src/eval/plots.py. Agg backend only; no
+# display is required.
+matplotlib==3.11.1
 
 # Kaggle download in scripts/fetch_data.py. Imported lazily inside the download
 # function so that `--verify` works without it, and so importing the module does

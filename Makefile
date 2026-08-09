@@ -22,11 +22,12 @@ RAW_FILES := $(RAW)/PdM_telemetry.csv $(RAW)/PdM_errors.csv $(RAW)/PdM_maint.csv
              $(RAW)/PdM_failures.csv $(RAW)/PdM_machines.csv
 
 FEATURES        := $(GENERATED)/features_train.parquet
+MODELS          := models/training_summary.json
 FEATURE_SOURCES := src/features/config.py src/features/store.py \
                    src/features/compute.py src/features/build.py
 
-.PHONY: all data features inventory test verify investigate clean distclean help \
-        fetch-data fetch-data-verify
+.PHONY: all data features train evaluate evaluate-test case-study inventory test \
+        verify investigate clean distclean help fetch-data fetch-data-verify
 
 all: features
 
@@ -52,6 +53,24 @@ $(FEATURES): $(DB) $(FEATURE_SOURCES)
 	$(PYTHON) -m src.features.build --db $(DB) --out $(GENERATED) \
 		--manifest $(MANIFEST)
 
+## train: fit per-component models, selected by rolling-origin CV on train
+train: $(MODELS)
+
+$(MODELS): $(FEATURES) src/models/train.py src/eval/folds.py src/eval/datasets.py
+	$(PYTHON) -m src.models.train
+
+## evaluate: baselines, metrics, calibration, thresholds and importance on VALIDATION
+evaluate: $(MODELS)
+	$(PYTHON) -m src.eval.validate
+
+## evaluate-test: the one-shot test-split evaluation. Run once, at the very end.
+evaluate-test:
+	$(PYTHON) -m src.eval.test_evaluation
+
+## case-study: reproduce the v1 leakage numbers from archive/v1-app/
+case-study:
+	$(PYTHON) scripts/leakage_case_study.py
+
 ## inventory: regenerate the seeded synthetic parts inventory
 inventory: $(INVENTORY)
 
@@ -75,6 +94,8 @@ clean:
 	rm -f $(DB) $(INVENTORY) $(MANIFEST)
 	rm -f $(GENERATED)/features_train.parquet $(GENERATED)/features_val.parquet \
 	      $(GENERATED)/features_test.parquet
+	rm -f models/*.joblib models/training_summary.json
+	rm -f $(GENERATED)/validation_results.json
 	rm -rf .pytest_cache
 	find . -path ./venv -prune -o -name __pycache__ -type d -exec rm -rf {} + 2>/dev/null || true
 

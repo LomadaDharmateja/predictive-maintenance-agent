@@ -318,8 +318,9 @@ agent, the Pinecone retrieval layer, the commodity and supplier tools, the LangG
 sketch, and the RandomForest pickle trained on the AI4I table — is retained under
 `archive/v1-app/` for the same reason. None of it is imported by anything in `src/`.
 
-The AI4I data is kept because it is intended to be the subject of a data-leakage case
-study. `docs/LEAKAGE_CASE_STUDY.md` has not been written yet.
+The AI4I data is kept because it is the subject of the data-leakage case study in
+`docs/leakage-case-study.md`, whose figures are recomputed from the archived code
+by `make case-study` rather than quoted.
 
 ---
 

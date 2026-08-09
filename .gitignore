@@ -40,7 +40,9 @@ data/generated/
 # traceable, not the binaries.
 mlruns/
 mlartifacts/
-models/
+# Leading slash: root-level only. A bare `models/` also matches src/models/,
+# which is source code, and silently kept the training module out of git.
+/models/
 
 # Test / tooling
 .pytest_cache/

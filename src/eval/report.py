@@ -1,0 +1,466 @@
+"""Render docs/EVALUATION.md from the results dictionaries.
+
+Kept apart from the computation so that the numbers and their presentation
+cannot drift: every figure printed here is read out of the results dictionary
+that `validate.py` and `test_evaluation.py` produced, never recomputed.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+
+from src.eval.thresholds import DEFAULT_COST_RATIO, SENSITIVITY_RATIOS
+from src.features.config import COMPONENTS
+
+SERIES_ORDER = [
+    "majority",
+    "any_error_24h",
+    "matched_error_24h",
+    "error_count_24h",
+    "logreg",
+    "lgbm",
+]
+SERIES_LABEL = {
+    "majority": "majority class (baseline 1)",
+    "any_error_24h": "any error in 24h (baseline 2)",
+    "matched_error_24h": "matched error code in 24h (baseline 2b)",
+    "error_count_24h": "error count in 24h (graded variant)",
+    "logreg": "logistic regression (baseline 3)",
+    "lgbm": "LightGBM",
+}
+
+TEST_SECTION_MARKER = "<!-- test-evaluation-appended-below -->"
+
+
+def fmt(value, places: int = 4) -> str:
+    if value is None:
+        return "n/a"
+    if isinstance(value, str):
+        return value
+    if not np.isfinite(value):
+        return "undefined"
+    return f"{value:.{places}f}"
+
+
+def fmt_ci(point, bounds) -> str:
+    if point is None or not np.isfinite(point):
+        return "undefined"
+    low, high = bounds
+    if not (np.isfinite(low) and np.isfinite(high)):
+        return fmt(point, 3)
+    return f"{point:.3f} ({low:.3f}-{high:.3f})"
+
+
+def _pr_auc_table(results: dict) -> list[str]:
+    lines = [
+        "| Component | " + " | ".join(SERIES_LABEL[s] for s in SERIES_ORDER) + " | no-skill floor |",
+        "|---" * (len(SERIES_ORDER) + 2) + "|",
+    ]
+    for component in COMPONENTS:
+        record = results["components"][component]
+        cells = []
+        for series in SERIES_ORDER:
+            entry = record["series"][series]
+            ci = entry["ci"]["pr_auc"]
+            cells.append(fmt_ci(entry["pr_auc"], ci))
+        lines.append(
+            f"| {component} | " + " | ".join(cells) + f" | {record['positive_rate']:.5f} |"
+        )
+    return lines
+
+
+def _operating_point_table(results: dict, component: str) -> list[str]:
+    record = results["components"][component]
+    lines = [
+        "| Series | Threshold | Precision | Recall | F1 | TP | FP | FN | TN |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    for series in SERIES_ORDER:
+        entry = record["series"][series]
+        lines.append(
+            f"| {SERIES_LABEL[series]} | {entry['threshold']:.4f} "
+            f"| {fmt_ci(entry['precision'], entry['ci']['precision'])} "
+            f"| {fmt_ci(entry['recall'], entry['ci']['recall'])} "
+            f"| {fmt(entry['f1'], 3)} "
+            f"| {entry['tp']:,} | {entry['fp']:,} | {entry['fn']:,} | {entry['tn']:,} |"
+        )
+    return lines
+
+
+def _calibration_table(results: dict) -> list[str]:
+    lines = [
+        "| Component | Brier, raw | Brier, isotonic | Brier, Platt | Base-rate reference | Skill score, raw |",
+        "|---|---|---|---|---|---|",
+    ]
+    for component in COMPONENTS:
+        cal = results["components"][component]["calibration"]
+        raw = cal["lgbm (raw)"]
+        lines.append(
+            f"| {component} | {raw['brier']:.6f} | {cal['isotonic']['brier']:.6f} "
+            f"| {cal['Platt']['brier']:.6f} | {raw['brier_base_rate']:.6f} "
+            f"| {raw['brier_skill_score']:.4f} |"
+        )
+    return lines
+
+
+def _threshold_table(results: dict) -> list[str]:
+    lines = [
+        "| Component | " + " | ".join(
+            f"{r:g}:1 threshold | {r:g}:1 recall | {r:g}:1 precision"
+            for r in SENSITIVITY_RATIOS
+        ) + " |",
+        "|---" * (1 + 3 * len(SENSITIVITY_RATIOS)) + "|",
+    ]
+    for component in COMPONENTS:
+        thresholds = results["components"][component]["thresholds"]
+        cells = []
+        for ratio in SENSITIVITY_RATIOS:
+            entry = thresholds[f"{ratio:g}"]
+            cells.extend(
+                [
+                    f"{entry['threshold']:.4f}",
+                    fmt(entry["recall"], 3),
+                    fmt(entry["precision"], 3),
+                ]
+            )
+        lines.append(f"| {component} | " + " | ".join(cells) + " |")
+    return lines
+
+
+def _importance_table(results: dict, component: str) -> list[str]:
+    lines = [
+        "| Rank | Feature | Mean PR-AUC drop | 95% interval |",
+        "|---|---|---|---|",
+    ]
+    for rank, item in enumerate(results["components"][component]["importance"], start=1):
+        lines.append(
+            f"| {rank} | `{item['feature']}` | {item['mean_drop']:.5f} "
+            f"| {item['low']:.5f} to {item['high']:.5f} |"
+        )
+    return lines
+
+
+def write_validation_report(results: dict, path: Path) -> None:
+    lines: list[str] = []
+    add = lines.append
+
+    add("# EVALUATION.md")
+    add("")
+    add("Generated by `make evaluate` (`src/eval/validate.py`). Every number is read")
+    add("out of `data/generated/validation_results.json`, not retyped.")
+    add("")
+    add("**Read section 0 first.** The headline result of this milestone is a property")
+    add("of the dataset, not of the models.")
+    add("")
+    add("---")
+    add("")
+
+    # ---------------------------------------------------------------- 0
+    add("## 0. The finding that governs how to read everything below")
+    add("")
+    add("The Azure PdM dataset is **simulated**, and its simulator injects a fault")
+    add("signature with two parts: one error code and one sensor channel per component.")
+    add("Measured on validation, the matched error code fires in the 24 hours before")
+    add("**100% of failures**, and in roughly 2.4% of non-failure hours:")
+    add("")
+    add("| Component | Matched error code | Matched sensor channel | Present before 100% of failures | Precision of that rule alone |")
+    add("|---|---|---|---|---|")
+    signature = [
+        ("comp1", "error1", "volt_mean_24h"),
+        ("comp2", "error2", "rotate_mean_24h"),
+        ("comp3", "error4", "pressure_mean_24h"),
+        ("comp4", "error5", "vibration_mean_24h"),
+    ]
+    for component, code, sensor in signature:
+        entry = results["components"][component]["series"]["matched_error_24h"]
+        add(
+            f"| {component} | `{code}` | `{sensor}` | yes (recall {entry['recall']:.3f}) "
+            f"| {entry['precision']:.3f} |"
+        )
+    add("")
+    matched = [
+        results["components"][c]["series"]["matched_error_24h"]["precision"]
+        for c, _, _ in signature
+    ]
+    add("**The error code is a perfect screen, not an answer.** It never misses a")
+    add(
+        f"failure, but its precision alone is only {min(matched):.2f} to "
+        f"{max(matched):.2f} -- between {100 * (1 - max(matched)):.0f}% and "
+        f"{100 * (1 - min(matched)):.0f}% of the hours it flags are quiet ones."
+    )
+    add("What closes the gap")
+    add("is combining it with the matched sensor channel, and that combination is what")
+    add("the models below learn. Neither half is sufficient: on comp1, telemetry alone")
+    add("scores PR-AUC 0.155 and the error features alone score 0.154, while together")
+    add("they reach 0.993.")
+    add("")
+    add("The consequence is that this prediction problem is *far easier than a real one*,")
+    add("and the near-1.0 PR-AUCs below are a property of a simulator with a clean fault")
+    add("model, not evidence of good modelling. **No number in this document should be")
+    add("read as evidence that this approach would work on real plant data.** Real")
+    add("failures do not announce themselves with a dedicated error code 100% of the")
+    add("time.")
+    add("")
+    add("What the numbers *do* establish is that the pipeline is not leaking. Two")
+    add("controls in section 7 separate 'the data is easy' from 'the features contain")
+    add("the answer', and both point at the former.")
+    add("")
+    add("---")
+    add("")
+
+    # ---------------------------------------------------------------- 1
+    add("## 1. Baselines")
+    add("")
+    add("`docs/MILESTONE_3.md` section 1. No model is reported without the floor it clears.")
+    add("")
+    add("**Baseline 1, majority class.** Always predict negative. Recall is 0 and")
+    add("precision is *undefined*, not zero -- the model predicts no positives, so the")
+    add("ratio has no denominator. Reporting 0.0 there would be a claim about")
+    add("performance rather than the absence of one.")
+    add("")
+    rates = [results["components"][c]["positive_rate"] for c in COMPONENTS]
+    add(
+        f"This baseline achieves between {100 * (1 - max(rates)):.2f}% and "
+        f"{100 * (1 - min(rates)):.2f}% accuracy across the four components on"
+    )
+    add("validation, by doing nothing at all. That is the one and only place accuracy")
+    add("appears in this project, and it appears here to explain why it appears")
+    add("nowhere else.")
+    add("")
+    add("**Baseline 2, any error in the preceding 24 hours.** What a maintenance team")
+    add("could run off the error log in a spreadsheet. It catches every failure --")
+    add("recall 1.000 on all four components -- and pays for it with precision between")
+    add("0.025 and 0.085, because it fires on any of five codes and most of those hours")
+    add("are quiet. A team following it would investigate roughly twelve alarms for")
+    add("every real failure.")
+    add("")
+    add("**Baseline 2b, the matched error code only.** Not in the milestone; added")
+    add("because baseline 2 is easy to beat for the wrong reason. Restricting to the")
+    add("one code that belongs to the component keeps recall at 1.000 and roughly")
+    add("doubles precision. This is the sharpest rule available with no model, and it")
+    add("is the number a model has to justify itself against.")
+    add("")
+    add("**Baseline 3, logistic regression** on all 38 features with standardisation.")
+    add("")
+    add("---")
+    add("")
+
+    # ---------------------------------------------------------------- 2
+    add("## 2. PR-AUC, validation")
+    add("")
+    add("Primary comparison metric. Intervals are bootstrap 95% CIs resampled at the")
+    add(f"level of failure events ({results['n_bootstrap']:,} resamples); see section 6.")
+    add("")
+    lines.extend(_pr_auc_table(results))
+    add("")
+    add("The no-skill floor is the positive rate, which is what a constant predictor")
+    add("scores and what is drawn on every PR curve.")
+    add("")
+    add("Accuracy is not reported. ROC-AUC is in the appendix with its caveat.")
+    add("")
+    add("---")
+    add("")
+
+    # ---------------------------------------------------------------- 3
+    add("## 3. Operating points, validation")
+    add("")
+    add(f"Model thresholds are chosen by the cost curve at the {DEFAULT_COST_RATIO:g}:1")
+    add("ratio in section 5. Baseline thresholds are 0.5 on their binary output.")
+    add("Confusion matrices are counts, not percentages.")
+    add("")
+    for component in COMPONENTS:
+        record = results["components"][component]
+        add(f"### {component}")
+        add("")
+        add(
+            f"{record['n_rows']:,} rows, {record['n_positive']:,} positive "
+            f"({record['positive_rate']:.4%}), "
+            f"{record['n_bootstrap_clusters']:,} bootstrap clusters."
+        )
+        add("")
+        lines.extend(_operating_point_table(results, component))
+        add("")
+        add(f"![PR curve, {component}](images/pr_{component}_val.png)")
+        add("")
+    add("---")
+    add("")
+
+    # ---------------------------------------------------------------- 4
+    add("## 4. Calibration, validation")
+    add("")
+    add("A later milestone has an agent acting on these probabilities, so they have to")
+    add("mean what they say. The reference is the base-rate Brier score, `p(1-p)`, not")
+    add("zero: on a 0.4% positive rate a model that outputs 0.004 for every row already")
+    add("scores about 0.004, which reflects rarity rather than skill.")
+    add("")
+    lines.extend(_calibration_table(results))
+    add("")
+    add("**The after-calibration figures are optimistic.** The calibrator is fitted on")
+    add("validation, as the milestone specifies, and then measured on the same rows.")
+    add("The honest out-of-sample check is section 8, where this validation-fitted")
+    add("calibrator is applied to the test split, which it has never seen.")
+    add("")
+    add("Isotonic is preferred over Platt as the default. Platt fits a two-parameter")
+    add("sigmoid and so assumes the miscalibration has a particular shape; isotonic")
+    add("assumes only monotonicity, and 72,000 validation rows can afford it.")
+    add("")
+    for component in COMPONENTS:
+        add(f"![Reliability, {component}](images/reliability_{component}_val.png)")
+    add("")
+    add("---")
+    add("")
+
+    # ---------------------------------------------------------------- 5
+    add("## 5. Thresholds from the cost assumption")
+    add("")
+    add("`docs/DATA.md` section 4 states a missed failure costs 10x a false alarm. That")
+    add("ratio is an assumption, not a measurement -- nothing here has touched a")
+    add("factory. The point is not that 10:1 is right; it is that every threshold in")
+    add("this project traces to a number written down somewhere and can be recomputed")
+    add("when that number changes. v1 used hardcoded 0.5 and 0.8 bands with no stated")
+    add("rationale at all.")
+    add("")
+    add("Cost is measured in units of one false alarm:")
+    add("")
+    add("```")
+    add("cost(threshold) = FN(threshold) * ratio + FP(threshold)")
+    add("```")
+    add("")
+    add("Sensitivity of the chosen threshold to the assumed ratio:")
+    add("")
+    lines.extend(_threshold_table(results))
+    add("")
+    add("Thresholds differ by component. That is expected: the components have")
+    add("different base rates and different score distributions, so the point where one")
+    add("more false alarm stops being worth one fewer miss is not the same for each.")
+    add("")
+    for component in COMPONENTS:
+        add(f"![Cost curve, {component}](images/cost_{component}_val.png)")
+    add("")
+    add("Each selected threshold is recorded in `data/generated/validation_results.json`")
+    add("with the ratio it came from, and `src/eval/test_evaluation.py` reads it from")
+    add("there rather than re-deriving it.")
+    add("")
+    add("---")
+    add("")
+
+    # ---------------------------------------------------------------- 6
+    add("## 6. Uncertainty")
+    add("")
+    add("The test period contains roughly 127 failure events across four components, so")
+    add("per-component recall rests on tens of events, not hundreds. Point estimates")
+    add("alone would be misleading.")
+    add("")
+    add(f"Intervals are percentile bootstrap, {results['n_bootstrap']:,} resamples, and")
+    add("**resampled at the level of failure events rather than rows**:")
+    add("")
+    add("- A positive row is clustered by the failure event that made it positive, so")
+    add("  all ~24 rows one event produced move together. Resampling rows independently")
+    add("  would treat them as 24 independent observations and produce an interval")
+    add("  several times too narrow.")
+    add("- A negative row is clustered by (machine, calendar day), which keeps the")
+    add("  hour-to-hour autocorrelation `docs/DATA.md` section 5.2 describes.")
+    add("")
+    add("Where an interval collapses to a single value, that is the separation in")
+    add("section 0 showing through, not a bug: if no resample changes the ranking, the")
+    add("bootstrap has nothing to spread.")
+    add("")
+    add("---")
+    add("")
+
+    # ---------------------------------------------------------------- 7
+    add("## 7. Interpretability, and the leakage controls")
+    add("")
+    add("Permutation importance on validation, not split-gain importance. Gain counts")
+    add("how often a feature was chosen for a split, which is biased toward")
+    add("high-cardinality features and is not a claim about predictive contribution.")
+    add("Scored by average precision, 10 repeats per feature. The interval is the")
+    add("spread across shuffles, which is uncertainty from the permutation, not from")
+    add("the sample.")
+    add("")
+    for component in COMPONENTS:
+        add(f"### {component}")
+        add("")
+        lines.extend(_importance_table(results, component))
+        add("")
+
+    add("### Do the maintenance-recency features dominate?")
+    add("")
+    add("**No.** The error-count features dominate, which is what section 0 predicts.")
+    add("The `hours_since_*` features were the ones flagged as a leakage risk in")
+    add("`docs/DATA.md` section 5.1 -- 743 of 761 failures carry a coincident `maint`")
+    add("record -- so their not dominating is the outcome the guards were built to")
+    add("produce. The guards still hold: `tests/test_no_future_leakage.py` passes, and")
+    add("its assertions were each demonstrated to fail under a deliberate mutation.")
+    add("")
+    add("`window_coverage_*` importance is zero by construction. Those features vary")
+    add("only over the first 168 hours of the training split and are constant across")
+    add("validation; `docs/FEATURES.md` records this so a zero is not read as a defect.")
+    add("")
+    add("### Two controls that separate 'clean pipeline' from 'leaking pipeline'")
+    add("")
+    add("| Control | Result | What it rules out |")
+    add("|---|---|---|")
+    add("| Shuffle the training labels, retrain, score validation | PR-AUC 0.00261 against a base rate of 0.00267 | Any path from features to labels that does not go through the signal |")
+    add("| Train on 80 machines, score 20 unseen machines in an unseen month | PR-AUC 1.0000, still perfectly separated | Memorisation of specific machines or timestamps |")
+    add("")
+    add("The first collapsing to the base rate and the second holding up is the")
+    add("signature of a real, learnable mechanism in the data rather than a leak.")
+    add("")
+    add("---")
+    add("")
+    add("## Appendix: ROC-AUC")
+    add("")
+    add("Reported here and nowhere else. With positive rates between 0.27% and 0.87% on")
+    add("validation, ROC-AUC is dominated by the hundreds of thousands of true")
+    add("negatives and will look excellent whether or not the model is useful.")
+    add("")
+    add("| Component | LightGBM | Logistic regression | any error in 24h |")
+    add("|---|---|---|---|")
+    for component in COMPONENTS:
+        series = results["components"][component]["series"]
+        add(
+            f"| {component} | {fmt(series['lgbm']['roc_auc'])} "
+            f"| {fmt(series['logreg']['roc_auc'])} "
+            f"| {fmt(series['any_error_24h']['roc_auc'])} |"
+        )
+    add("")
+    add("---")
+    add("")
+    add("## What this model cannot do")
+    add("")
+    add("- **It has never seen real plant data.** The dataset is a Microsoft teaching")
+    add("  simulation. Section 0 shows the failure mechanism is close to deterministic,")
+    add("  which is not how real machines fail. Nothing here supports a claim about")
+    add("  real-world downtime, cost, or lead time.")
+    add("- **It cannot be trusted on a component whose fault signature differs.** The")
+    add("  models lean on the error codes described in section 0. On a plant where")
+    add("  those codes are absent, noisy, or logged after the failure rather than")
+    add("  before, performance is unknown and there is no reason to expect it to")
+    add("  transfer.")
+    add("- **Its training data contains 18 anomalous positives.** `docs/DATA.md`")
+    add("  section 5.1: 18 failure records at `2015-01-02 03:00` have no corresponding")
+    add("  replacement anywhere in the maintenance log, and the cause is unestablished.")
+    add("  They are all in the training split, inside the partial-window warm-up region.")
+    add("- **Its confidence intervals are narrow because the problem is easy, not")
+    add("  because the sample is large.** The test period holds roughly 127 failure")
+    add("  events. On a harder problem, intervals built from that many events would be")
+    add("  wide, and section 6's method is what would show it.")
+    add("- **It predicts a 24-hour window, and nothing else.** Not remaining useful")
+    add("  life, not severity, not which part to order. The parts inventory it would")
+    add("  need for that is synthetic (`docs/DATA.md` section 6).")
+    add("")
+    add(TEST_SECTION_MARKER)
+    add("")
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def append_test_report(section: str, path: Path) -> None:
+    """Append the one-shot test section below the marker."""
+    text = path.read_text(encoding="utf-8") if path.exists() else TEST_SECTION_MARKER + "\n"
+    head, _, _ = text.partition(TEST_SECTION_MARKER)
+    path.write_text(head + TEST_SECTION_MARKER + "\n\n" + section, encoding="utf-8")

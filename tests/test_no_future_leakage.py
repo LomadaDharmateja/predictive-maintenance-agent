@@ -450,13 +450,48 @@ def shuffling_calls_in(path: Path) -> list[str]:
     return found
 
 
+#: Narrow, documented exemptions. `permutation` appears in
+#: `src/eval/importance.py` because permutation *importance* shuffles one feature
+#: column at a time to measure its contribution. That is not splitting, and the
+#: milestone requires it. The exemption is keyed to (module, name) so a
+#: `train_test_split` in the same file would still be caught.
+SHUFFLING_EXEMPTIONS = {("src/eval/importance.py", "permutation")}
+
+
 def test_no_shuffled_splitting_anywhere_in_src():
-    offenders = {
-        path.relative_to(REPO_ROOT).as_posix(): calls
-        for path in sorted(SRC.rglob("*.py"))
-        if (calls := shuffling_calls_in(path))
-    }
+    offenders = {}
+    for path in sorted(SRC.rglob("*.py")):
+        relative = path.relative_to(REPO_ROOT).as_posix()
+        calls = [
+            name
+            for name in shuffling_calls_in(path)
+            if (relative, name) not in SHUFFLING_EXEMPTIONS
+        ]
+        if calls:
+            offenders[relative] = calls
     assert offenders == {}
+
+
+def test_the_exemption_list_does_not_hide_a_real_splitter(tmp_path):
+    """An exemption is a hole. This checks it is only as wide as it claims:
+    exempting `permutation` in that module must not also exempt a split call."""
+    planted = tmp_path / "importance.py"
+    planted.write_text(
+        "from sklearn.model_selection import train_test_split\n"
+        "import numpy as np\n"
+        "def go(x, y):\n"
+        "    np.random.permutation(x)\n"
+        "    return train_test_split(x, y)\n",
+        encoding="utf-8",
+    )
+    calls = shuffling_calls_in(planted)
+    remaining = [
+        name
+        for name in calls
+        if ("src/eval/importance.py", name) not in SHUFFLING_EXEMPTIONS
+    ]
+    assert "train_test_split" in remaining
+    assert "permutation" not in remaining
 
 
 def test_sample_and_random_state_are_absent_from_the_feature_layer():

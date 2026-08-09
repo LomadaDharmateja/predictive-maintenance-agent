@@ -99,5 +99,16 @@
       "rows": 876100,
       "sha256": "13fc73df72ca8cafd5e51d5e5d383d63a9e9a112c982a05a9dfbd29c5f7ca7f0"
     }
+  },
+  "test_evaluation": {
+    "runs": [
+      {
+        "git_commit": "0876f49a7ac6e63a39661be4ef0159c05a602863",
+        "model_fingerprint": "c0179ef3b00a1dd54f5edbb466f35872223a702d08fda8ef387dc4d38d0ac7d5",
+        "run": 1,
+        "test_data_sha256": "cc020c2b4c93eedd0d4ebf5faae195db954d7996ee0d63a72338407b2f3773e3",
+        "utc": "2026-08-09T13:15:39Z"
+      }
+    ]
   }
 }
