@@ -15,7 +15,24 @@ import pandas as pd
 
 #: Prediction horizon. A row at time `t` is positive for component `k` if a `k`
 #: failure occurs in `(t, t + LABEL_HORIZON]`. docs/DATA.md section 4.
-LABEL_HORIZON = pd.Timedelta(hours=24)
+#:
+#: **14 days, derived rather than inherited.** Milestone 3 used 24 hours because
+#: that is the standard framing of this dataset, and scored PR-AUC 1.000 with
+#: sound controls. It was still the wrong horizon: supplier lead times in
+#: data/generated/parts_inventory.csv run 10 to 34 days, so a 24-hour warning
+#: cannot inform the decision the model exists to serve.
+#:
+#: 14 days is the longest horizon at which LightGBM still beats the matched-error
+#: baseline with non-overlapping bootstrap intervals on all four components. At
+#: 30 days -- the shortest horizon that covers the median 23-day lead time -- the
+#: intervals overlap for comp1 and comp2, so predictability is no longer
+#: established. No horizon satisfies both constraints. docs/SIGNAL_ANALYSIS.md
+#: section 4 documents that impossibility and what follows from it.
+LABEL_HORIZON = pd.Timedelta(days=14)
+
+#: The horizon Milestone 3 used, kept so the archived results in
+#: docs/EVALUATION_24h.md remain reproducible and so the sweep has its anchor.
+LEGACY_HORIZON_24H = pd.Timedelta(hours=24)
 
 #: The last failure timestamp present in the source data. Telemetry runs to
 #: 2016-01-01 06:00, but a row whose label window extends past this point cannot

@@ -8,38 +8,60 @@ of the dataset, not of the models.
 
 ---
 
-## 0. The finding that governs how to read everything below
+## 0. The 24-hour finding, and why the horizon moved
 
-The Azure PdM dataset is **simulated**, and its simulator injects a fault
-signature with two parts: one error code and one sensor channel per component.
-Measured on validation, the matched error code fires in the 24 hours before
-**100% of failures**, and in roughly 2.4% of non-failure hours:
+**Milestone 3 scored PR-AUC 1.000 on three of four components at a 24-hour
+horizon, and the controls say that result is real.** It is also useless, and
+why it is useless is the most valuable thing in this document.
 
-| Component | Matched error code | Matched sensor channel | Present before 100% of failures | Precision of that rule alone |
-|---|---|---|---|---|
-| comp1 | `error1` | `volt_mean_24h` | yes (recall 1.000) | 0.099 |
-| comp2 | `error2` | `rotate_mean_24h` | yes (recall 1.000) | 0.278 |
-| comp3 | `error4` | `pressure_mean_24h` | yes (recall 1.000) | 0.123 |
-| comp4 | `error5` | `vibration_mean_24h` | yes (recall 1.000) | 0.444 |
+### The measurement
 
-**The error code is a perfect screen, not an answer.** It never misses a
-failure, but its precision alone is only 0.10 to 0.44 -- between 56% and 90% of the hours it flags are quiet ones.
-What closes the gap
-is combining it with the matched sensor channel, and that combination is what
-the models below learn. Neither half is sufficient: on comp1, telemetry alone
-scores PR-AUC 0.155 and the error features alone score 0.154, while together
-they reach 0.993.
+The full record is archived in `docs/EVALUATION_24h.md`. At 24 hours, on
+validation, LightGBM reached PR-AUC 1.000 for comp1, comp2 and comp3 and 0.999
+for comp4, against no-skill floors of 0.003 to 0.009.
 
-The consequence is that this prediction problem is *far easier than a real one*,
-and the near-1.0 PR-AUCs below are a property of a simulator with a clean fault
-model, not evidence of good modelling. **No number in this document should be
-read as evidence that this approach would work on real plant data.** Real
-failures do not announce themselves with a dedicated error code 100% of the
-time.
+### The two controls proving it is neither leakage nor memorisation
 
-What the numbers *do* establish is that the pipeline is not leaking. Two
-controls in section 7 separate 'the data is easy' from 'the features contain
-the answer', and both point at the former.
+| Control | Result | What it rules out |
+|---|---|---|
+| Shuffle the training labels, retrain, score validation | PR-AUC 0.00261 against a base rate of 0.00267 | Any path from features to labels that bypasses the signal |
+| Train on 80 machines, score 20 unseen machines in an unseen month | PR-AUC 1.0000, still perfectly separated | Memorisation of specific machines or timestamps |
+
+The first collapsing to the base rate and the second holding up is the
+signature of a real learnable mechanism, not a leak.
+
+### The fault signature that explains it
+
+The simulator injects a matched error code and a matched sensor channel per
+component. The code fires in the 24 hours before **100% of failures** and in
+about 2.4% of quiet hours. `docs/SIGNAL_ANALYSIS.md` measures its lead time:
+the median first occurrence is **24 hours** before the failure. The signal is
+real, and it is short.
+
+### Why a 24-hour horizon cannot serve the decision
+
+The system exists so an agent can decide whether to reserve or order a
+replacement part. Supplier lead times in `data/generated/parts_inventory.csv`
+run **10 to 34 days, median 23**. A 24-hour warning cannot inform a decision
+whose action takes three weeks to execute.
+
+The horizon was inherited from the standard framing of this dataset, not
+derived from the decision the model serves. Everything downstream was hollowed
+out by that: with PR-AUC at 1.000 the calibration table read 0.000000, every
+cost-optimal threshold landed on the same 0.99, and the sensitivity table was
+identical at 3:1, 10:1 and 30:1. Those sections were not measuring anything.
+
+### What this document reports instead
+
+A **14-day horizon**, chosen in `docs/SIGNAL_ANALYSIS.md` section 4 as the
+longest at which the model still beats the matched-code baseline with
+non-overlapping bootstrap intervals on all four components. Scores are far
+lower and the sections below now do real work.
+
+**14 days does not satisfy the lead-time constraint either, and no horizon
+does.** That negative result, and what follows from it for the agent's
+parts-ordering tool, is documented in `docs/SIGNAL_ANALYSIS.md` section 4 and
+summarised in `docs/DATA.md` section 4.
 
 ---
 
@@ -52,23 +74,22 @@ precision is *undefined*, not zero -- the model predicts no positives, so the
 ratio has no denominator. Reporting 0.0 there would be a claim about
 performance rather than the absence of one.
 
-This baseline achieves between 99.13% and 99.74% accuracy across the four components on
+This baseline achieves between 85.09% and 97.46% accuracy across the four components on
 validation, by doing nothing at all. That is the one and only place accuracy
 appears in this project, and it appears here to explain why it appears
 nowhere else.
 
 **Baseline 2, any error in the preceding 24 hours.** What a maintenance team
-could run off the error log in a spreadsheet. It catches every failure --
-recall 1.000 on all four components -- and pays for it with precision between
-0.025 and 0.085, because it fires on any of five codes and most of those hours
-are quiet. A team following it would investigate roughly twelve alarms for
-every real failure.
+could run off the error log in a spreadsheet.
 
-**Baseline 2b, the matched error code only.** Not in the milestone; added
-because baseline 2 is easy to beat for the wrong reason. Restricting to the
-one code that belongs to the component keeps recall at 1.000 and roughly
-doubles precision. This is the sharpest rule available with no model, and it
-is the number a model has to justify itself against.
+**Baseline 2b, the matched error code only.** The sharpest rule available with
+no model.
+
+Both were near-perfect *screens* at 24 hours, catching every failure at poor
+precision. At 14 days they catch almost nothing: the error code fires roughly
+a day before a failure, so at a two-week horizon most positive rows are hours
+at which no code has fired yet. Their recall collapses from 1.000 to between
+0.06 and 0.15. That collapse is the horizon effect, not a change in the rule.
 
 **Baseline 3, logistic regression** on all 38 features with standardisation.
 
@@ -81,10 +102,10 @@ level of failure events (1,000 resamples); see section 6.
 
 | Component | majority class (baseline 1) | any error in 24h (baseline 2) | matched error code in 24h (baseline 2b) | error count in 24h (graded variant) | logistic regression (baseline 3) | LightGBM | no-skill floor |
 |---|---|---|---|---|---|---|---|
-| comp1 | 0.003 (0.001-0.005) | 0.026 (0.011-0.045) | 0.099 (0.042-0.164) | 0.029 (0.014-0.063) | 0.935 (0.774-1.000) | 1.000 (1.000-1.000) | 0.00267 |
-| comp2 | 0.009 (0.006-0.012) | 0.085 (0.057-0.118) | 0.278 (0.198-0.366) | 0.691 (0.580-0.785) | 0.999 (0.996-1.000) | 1.000 (1.000-1.000) | 0.00867 |
-| comp3 | 0.003 (0.001-0.005) | 0.025 (0.010-0.045) | 0.123 (0.050-0.211) | 0.031 (0.011-0.069) | 0.957 (0.823-1.000) | 1.000 (1.000-1.000) | 0.00258 |
-| comp4 | 0.005 (0.002-0.007) | 0.046 (0.025-0.070) | 0.444 (0.294-0.583) | 0.050 (0.027-0.089) | 1.000 (1.000-1.000) | 0.999 (0.993-1.000) | 0.00467 |
+| comp1 | 0.025 (0.007-0.049) | 0.025 (0.008-0.048) | 0.032 (0.012-0.059) | 0.026 (0.009-0.049) | 0.052 (0.018-0.124) | 0.335 (0.034-0.734) | 0.02544 |
+| comp2 | 0.149 (0.095-0.199) | 0.159 (0.102-0.212) | 0.174 (0.117-0.228) | 0.200 (0.143-0.254) | 0.284 (0.206-0.358) | 0.365 (0.254-0.478) | 0.14912 |
+| comp3 | 0.031 (0.009-0.060) | 0.033 (0.012-0.063) | 0.036 (0.015-0.070) | 0.033 (0.012-0.063) | 0.305 (0.085-0.496) | 0.380 (0.088-0.652) | 0.03118 |
+| comp4 | 0.065 (0.031-0.107) | 0.067 (0.033-0.110) | 0.089 (0.046-0.139) | 0.066 (0.033-0.109) | 0.275 (0.130-0.449) | 0.384 (0.212-0.550) | 0.06471 |
 
 The no-skill floor is the positive rate, which is what a constant predictor
 scores and what is drawn on every PR curve.
@@ -101,61 +122,61 @@ Confusion matrices are counts, not percentages.
 
 ### comp1
 
-72,000 rows, 192 positive (0.2667%), 3,009 bootstrap clusters.
+40,800 rows, 1,038 positive (2.5441%), 1,670 bootstrap clusters.
 
 | Series | Threshold | Precision | Recall | F1 | TP | FP | FN | TN |
 |---|---|---|---|---|---|---|---|---|
-| majority class (baseline 1) | 0.5000 | undefined | 0.000 (0.000-0.000) | undefined | 0 | 0 | 192 | 71,808 |
-| any error in 24h (baseline 2) | 0.5000 | 0.026 (0.011-0.045) | 1.000 (1.000-1.000) | 0.051 | 192 | 7,139 | 0 | 64,669 |
-| matched error code in 24h (baseline 2b) | 0.5000 | 0.099 (0.042-0.164) | 1.000 (1.000-1.000) | 0.181 | 192 | 1,739 | 0 | 70,069 |
-| error count in 24h (graded variant) | 0.5000 | 0.026 (0.011-0.045) | 1.000 (1.000-1.000) | 0.051 | 192 | 7,139 | 0 | 64,669 |
-| logistic regression (baseline 3) | 0.2169 | 0.869 (0.687-0.974) | 1.000 (1.000-1.000) | 0.930 | 192 | 29 | 0 | 71,779 |
-| LightGBM | 0.9900 | 1.000 (1.000-1.000) | 1.000 (1.000-1.000) | 1.000 | 192 | 0 | 0 | 71,808 |
+| majority class (baseline 1) | 0.5000 | undefined | 0.000 (0.000-0.000) | undefined | 0 | 0 | 1,038 | 39,762 |
+| any error in 24h (baseline 2) | 0.5000 | 0.024 (0.005-0.048) | 0.100 (0.032-0.270) | 0.039 | 104 | 4,257 | 934 | 35,505 |
+| matched error code in 24h (baseline 2b) | 0.5000 | 0.089 (0.022-0.168) | 0.098 (0.032-0.265) | 0.093 | 102 | 1,046 | 936 | 38,716 |
+| error count in 24h (graded variant) | 0.5000 | 0.024 (0.005-0.048) | 0.100 (0.032-0.270) | 0.039 | 104 | 4,257 | 934 | 35,505 |
+| logistic regression (baseline 3) | 0.3079 | 0.258 (0.070-0.500) | 0.090 (0.030-0.213) | 0.133 | 93 | 268 | 945 | 39,494 |
+| LightGBM | 0.8800 | 0.628 (0.033-0.883) | 0.307 (0.009-0.710) | 0.413 | 319 | 189 | 719 | 39,573 |
 
 ![PR curve, comp1](images/pr_comp1_val.png)
 
 ### comp2
 
-72,000 rows, 624 positive (0.8667%), 3,027 bootstrap clusters.
+40,800 rows, 6,084 positive (14.9118%), 1,489 bootstrap clusters.
 
 | Series | Threshold | Precision | Recall | F1 | TP | FP | FN | TN |
 |---|---|---|---|---|---|---|---|---|
-| majority class (baseline 1) | 0.5000 | undefined | 0.000 (0.000-0.000) | undefined | 0 | 0 | 624 | 71,376 |
-| any error in 24h (baseline 2) | 0.5000 | 0.085 (0.057-0.118) | 1.000 (1.000-1.000) | 0.157 | 624 | 6,707 | 0 | 64,669 |
-| matched error code in 24h (baseline 2b) | 0.5000 | 0.278 (0.198-0.366) | 1.000 (1.000-1.000) | 0.435 | 624 | 1,621 | 0 | 69,755 |
-| error count in 24h (graded variant) | 0.5000 | 0.085 (0.057-0.118) | 1.000 (1.000-1.000) | 0.157 | 624 | 6,707 | 0 | 64,669 |
-| logistic regression (baseline 3) | 0.5800 | 0.973 (0.934-1.000) | 1.000 (1.000-1.000) | 0.987 | 624 | 17 | 0 | 71,359 |
-| LightGBM | 0.9900 | 1.000 (1.000-1.000) | 1.000 (1.000-1.000) | 1.000 | 624 | 0 | 0 | 71,376 |
+| majority class (baseline 1) | 0.5000 | undefined | 0.000 (0.000-0.000) | undefined | 0 | 0 | 6,084 | 34,716 |
+| any error in 24h (baseline 2) | 0.5000 | 0.213 (0.131-0.294) | 0.153 (0.110-0.206) | 0.178 | 930 | 3,431 | 5,154 | 31,285 |
+| matched error code in 24h (baseline 2b) | 0.5000 | 0.420 (0.276-0.551) | 0.091 (0.063-0.126) | 0.149 | 552 | 762 | 5,532 | 33,954 |
+| error count in 24h (graded variant) | 0.5000 | 0.213 (0.131-0.294) | 0.153 (0.110-0.206) | 0.178 | 930 | 3,431 | 5,154 | 31,285 |
+| logistic regression (baseline 3) | 0.3938 | 0.176 (0.115-0.236) | 0.893 (0.821-0.952) | 0.295 | 5,432 | 25,350 | 652 | 9,366 |
+| LightGBM | 0.0060 | 0.221 (0.145-0.289) | 0.999 (0.995-1.000) | 0.362 | 6,075 | 21,401 | 9 | 13,315 |
 
 ![PR curve, comp2](images/pr_comp2_val.png)
 
 ### comp3
 
-72,000 rows, 186 positive (0.2583%), 3,008 bootstrap clusters.
+40,800 rows, 1,272 positive (3.1176%), 1,659 bootstrap clusters.
 
 | Series | Threshold | Precision | Recall | F1 | TP | FP | FN | TN |
 |---|---|---|---|---|---|---|---|---|
-| majority class (baseline 1) | 0.5000 | undefined | 0.000 (0.000-0.000) | undefined | 0 | 0 | 186 | 71,814 |
-| any error in 24h (baseline 2) | 0.5000 | 0.025 (0.010-0.045) | 1.000 (1.000-1.000) | 0.049 | 186 | 7,145 | 0 | 64,669 |
-| matched error code in 24h (baseline 2b) | 0.5000 | 0.123 (0.050-0.211) | 1.000 (1.000-1.000) | 0.220 | 186 | 1,322 | 0 | 70,492 |
-| error count in 24h (graded variant) | 0.5000 | 0.025 (0.010-0.045) | 1.000 (1.000-1.000) | 0.049 | 186 | 7,145 | 0 | 64,669 |
-| logistic regression (baseline 3) | 0.2573 | 0.930 (0.779-1.000) | 1.000 (1.000-1.000) | 0.964 | 186 | 14 | 0 | 71,800 |
-| LightGBM | 0.9900 | 1.000 (1.000-1.000) | 1.000 (1.000-1.000) | 1.000 | 186 | 0 | 0 | 71,814 |
+| majority class (baseline 1) | 0.5000 | undefined | 0.000 (0.000-0.000) | undefined | 0 | 0 | 1,272 | 39,528 |
+| any error in 24h (baseline 2) | 0.5000 | 0.042 (0.011-0.081) | 0.144 (0.062-0.304) | 0.065 | 183 | 4,178 | 1,089 | 35,350 |
+| matched error code in 24h (baseline 2b) | 0.5000 | 0.100 (0.023-0.200) | 0.075 (0.021-0.201) | 0.086 | 96 | 864 | 1,176 | 38,664 |
+| error count in 24h (graded variant) | 0.5000 | 0.042 (0.011-0.081) | 0.144 (0.062-0.304) | 0.065 | 183 | 4,178 | 1,089 | 35,350 |
+| logistic regression (baseline 3) | 0.1258 | 0.186 (0.041-0.321) | 0.765 (0.399-1.000) | 0.299 | 973 | 4,258 | 299 | 35,270 |
+| LightGBM | 0.0015 | 0.212 (0.073-0.350) | 0.999 (0.997-1.000) | 0.350 | 1,271 | 4,723 | 1 | 34,805 |
 
 ![PR curve, comp3](images/pr_comp3_val.png)
 
 ### comp4
 
-72,000 rows, 336 positive (0.4667%), 3,015 bootstrap clusters.
+40,800 rows, 2,640 positive (6.4706%), 1,615 bootstrap clusters.
 
 | Series | Threshold | Precision | Recall | F1 | TP | FP | FN | TN |
 |---|---|---|---|---|---|---|---|---|
-| majority class (baseline 1) | 0.5000 | undefined | 0.000 (0.000-0.000) | undefined | 0 | 0 | 336 | 71,664 |
-| any error in 24h (baseline 2) | 0.5000 | 0.046 (0.025-0.070) | 1.000 (1.000-1.000) | 0.088 | 336 | 6,995 | 0 | 64,669 |
-| matched error code in 24h (baseline 2b) | 0.5000 | 0.444 (0.294-0.583) | 1.000 (1.000-1.000) | 0.615 | 336 | 421 | 0 | 71,243 |
-| error count in 24h (graded variant) | 0.5000 | 0.046 (0.025-0.070) | 1.000 (1.000-1.000) | 0.088 | 336 | 6,995 | 0 | 64,669 |
-| logistic regression (baseline 3) | 0.2876 | 0.997 (0.988-1.000) | 1.000 (1.000-1.000) | 0.999 | 336 | 1 | 0 | 71,663 |
-| LightGBM | 0.9900 | 0.974 (0.899-1.000) | 0.988 (0.962-1.000) | 0.981 | 332 | 9 | 4 | 71,655 |
+| majority class (baseline 1) | 0.5000 | undefined | 0.000 (0.000-0.000) | undefined | 0 | 0 | 2,640 | 38,160 |
+| any error in 24h (baseline 2) | 0.5000 | 0.080 (0.033-0.138) | 0.132 (0.081-0.195) | 0.100 | 349 | 4,012 | 2,291 | 34,148 |
+| matched error code in 24h (baseline 2b) | 0.5000 | 0.446 (0.210-0.655) | 0.064 (0.036-0.095) | 0.111 | 168 | 209 | 2,472 | 37,951 |
+| error count in 24h (graded variant) | 0.5000 | 0.080 (0.033-0.138) | 0.132 (0.081-0.195) | 0.100 | 349 | 4,012 | 2,291 | 34,148 |
+| logistic regression (baseline 3) | 0.0450 | 0.157 (0.079-0.241) | 0.956 (0.895-0.995) | 0.269 | 2,524 | 13,590 | 116 | 24,570 |
+| LightGBM | 0.0185 | 0.282 (0.147-0.408) | 0.969 (0.891-0.999) | 0.437 | 2,558 | 6,503 | 82 | 31,657 |
 
 ![PR curve, comp4](images/pr_comp4_val.png)
 
@@ -170,10 +191,22 @@ scores about 0.004, which reflects rarity rather than skill.
 
 | Component | Brier, raw | Brier, isotonic | Brier, Platt | Base-rate reference | Skill score, raw |
 |---|---|---|---|---|---|
-| comp1 | 0.000000 | 0.000000 | 0.000000 | 0.002660 | 1.0000 |
-| comp2 | 0.000000 | 0.000000 | 0.000001 | 0.008592 | 1.0000 |
-| comp3 | 0.000000 | 0.000000 | 0.000000 | 0.002577 | 1.0000 |
-| comp4 | 0.000181 | 0.000113 | 0.000178 | 0.004645 | 0.9611 |
+| comp1 | 0.031459 | 0.018651 | 0.021205 | 0.024794 | -0.2688 |
+| comp2 | 0.117672 | 0.106573 | 0.115419 | 0.126882 | 0.0726 |
+| comp3 | 0.035202 | 0.020086 | 0.023175 | 0.030204 | -0.1654 |
+| comp4 | 0.056531 | 0.042969 | 0.053920 | 0.060519 | 0.0659 |
+
+**Two of the four raw models are worse than useless as probabilities.** The
+Brier skill score is negative for comp1 and comp3: their raw scores carry more
+squared error than simply predicting the base rate for every row. That is not
+a contradiction of the PR-AUC table -- the models *rank* well above the floor
+-- it means the numbers they emit are not probabilities and must not be read
+as one. Isotonic scaling repairs it, cutting the Brier score by 41% and 43%
+respectively and taking both below the base-rate reference. An agent acting on
+these outputs must use the calibrated score, not the raw one.
+
+At 24 hours this table read 0.000000 across the board and said nothing. It
+says something now, and what it says is a caution.
 
 **The after-calibration figures are optimistic.** The calibrator is fitted on
 validation, as the milestone specifies, and then measured on the same rows.
@@ -210,10 +243,10 @@ Sensitivity of the chosen threshold to the assumed ratio:
 
 | Component | 3:1 threshold | 3:1 recall | 3:1 precision | 10:1 threshold | 10:1 recall | 10:1 precision | 30:1 threshold | 30:1 recall | 30:1 precision |
 |---|---|---|---|---|---|---|---|---|---|
-| comp1 | 0.9900 | 1.000 | 1.000 | 0.9900 | 1.000 | 1.000 | 0.9900 | 1.000 | 1.000 |
-| comp2 | 0.9900 | 1.000 | 1.000 | 0.9900 | 1.000 | 1.000 | 0.9900 | 1.000 | 1.000 |
-| comp3 | 0.9900 | 1.000 | 1.000 | 0.9900 | 1.000 | 1.000 | 0.9900 | 1.000 | 1.000 |
-| comp4 | 0.9900 | 0.988 | 0.974 | 0.9900 | 0.988 | 0.974 | 0.9900 | 0.988 | 0.974 |
+| comp1 | 0.8800 | 0.307 | 0.628 | 0.8800 | 0.307 | 0.628 | 0.0005 | 1.000 | 0.051 |
+| comp2 | 0.3230 | 0.216 | 0.508 | 0.0060 | 0.999 | 0.221 | 0.0050 | 1.000 | 0.220 |
+| comp3 | 0.8700 | 0.522 | 0.530 | 0.0015 | 0.999 | 0.212 | 0.0010 | 1.000 | 0.211 |
+| comp4 | 0.2118 | 0.619 | 0.405 | 0.0185 | 0.969 | 0.282 | 0.0015 | 1.000 | 0.260 |
 
 Thresholds differ by component. That is expected: the components have
 different base rates and different score distributions, so the point where one
@@ -265,61 +298,61 @@ the sample.
 
 | Rank | Feature | Mean PR-AUC drop | 95% interval |
 |---|---|---|---|
-| 1 | `volt_mean_24h` | 0.92682 | 0.91976 to 0.93388 |
-| 2 | `error1_count_24h` | 0.80547 | 0.79826 to 0.81268 |
-| 3 | `hours_since_comp1` | 0.01161 | 0.00958 to 0.01365 |
-| 4 | `window_coverage_3h` | 0.00000 | 0.00000 to 0.00000 |
-| 5 | `window_coverage_24h` | 0.00000 | 0.00000 to 0.00000 |
-| 6 | `window_coverage_7d` | 0.00000 | 0.00000 to 0.00000 |
-| 7 | `error2_count_24h` | 0.00000 | 0.00000 to 0.00000 |
-| 8 | `error2_count_7d` | 0.00000 | 0.00000 to 0.00000 |
-| 9 | `error3_count_24h` | 0.00000 | 0.00000 to 0.00000 |
-| 10 | `error3_count_7d` | 0.00000 | 0.00000 to 0.00000 |
+| 1 | `hours_since_comp1` | 0.25207 | 0.24621 to 0.25794 |
+| 2 | `hours_since_comp4` | 0.21115 | 0.20655 to 0.21575 |
+| 3 | `age` | 0.17014 | 0.16731 to 0.17297 |
+| 4 | `hours_since_comp3` | 0.13688 | 0.13340 to 0.14037 |
+| 5 | `hours_since_comp2` | 0.11102 | 0.10783 to 0.11421 |
+| 6 | `volt_mean_24h` | 0.08776 | 0.08530 to 0.09022 |
+| 7 | `error1_count_24h` | 0.08372 | 0.08144 to 0.08600 |
+| 8 | `model_model4` | 0.05690 | 0.05436 to 0.05945 |
+| 9 | `volt_mean_3h` | 0.05615 | 0.05328 to 0.05902 |
+| 10 | `model_model3` | 0.04735 | 0.04292 to 0.05178 |
 
 ### comp2
 
 | Rank | Feature | Mean PR-AUC drop | 95% interval |
 |---|---|---|---|
-| 1 | `rotate_mean_24h` | 0.22185 | 0.21079 to 0.23291 |
-| 2 | `error3_count_24h` | 0.17256 | 0.15978 to 0.18535 |
-| 3 | `error2_count_24h` | 0.05260 | 0.04670 to 0.05851 |
-| 4 | `rotate_mean_3h` | 0.00000 | -0.00000 to 0.00000 |
-| 5 | `volt_mean_3h` | 0.00000 | 0.00000 to 0.00000 |
-| 6 | `volt_std_3h` | 0.00000 | 0.00000 to 0.00000 |
-| 7 | `volt_mean_24h` | 0.00000 | 0.00000 to 0.00000 |
-| 8 | `volt_std_24h` | 0.00000 | 0.00000 to 0.00000 |
-| 9 | `rotate_std_3h` | 0.00000 | 0.00000 to 0.00000 |
-| 10 | `rotate_std_24h` | 0.00000 | 0.00000 to 0.00000 |
+| 1 | `hours_since_comp2` | 0.09681 | 0.09429 to 0.09933 |
+| 2 | `rotate_mean_24h` | 0.07321 | 0.07238 to 0.07404 |
+| 3 | `error3_count_24h` | 0.04990 | 0.04947 to 0.05033 |
+| 4 | `hours_since_comp1` | 0.04272 | 0.04135 to 0.04408 |
+| 5 | `age` | 0.03155 | 0.03058 to 0.03252 |
+| 6 | `error2_count_24h` | 0.02908 | 0.02863 to 0.02953 |
+| 7 | `rotate_mean_3h` | 0.01724 | 0.01682 to 0.01765 |
+| 8 | `model_model4` | 0.01720 | 0.01662 to 0.01779 |
+| 9 | `hours_since_comp4` | 0.01474 | 0.01344 to 0.01604 |
+| 10 | `error2_count_7d` | 0.00861 | 0.00811 to 0.00911 |
 
 ### comp3
 
 | Rank | Feature | Mean PR-AUC drop | 95% interval |
 |---|---|---|---|
-| 1 | `pressure_mean_24h` | 0.83588 | 0.82961 to 0.84214 |
-| 2 | `error4_count_24h` | 0.76501 | 0.75952 to 0.77049 |
-| 3 | `pressure_std_3h` | 0.00000 | 0.00000 to 0.00000 |
-| 4 | `vibration_std_3h` | 0.00000 | 0.00000 to 0.00000 |
-| 5 | `vibration_mean_24h` | 0.00000 | 0.00000 to 0.00000 |
-| 6 | `vibration_std_24h` | 0.00000 | 0.00000 to 0.00000 |
-| 7 | `hours_since_comp3` | 0.00000 | 0.00000 to 0.00000 |
-| 8 | `rotate_std_3h` | 0.00000 | -0.00000 to 0.00000 |
-| 9 | `volt_mean_3h` | 0.00000 | -0.00000 to 0.00000 |
-| 10 | `pressure_std_24h` | 0.00000 | -0.00000 to 0.00000 |
+| 1 | `hours_since_comp3` | 0.18662 | 0.18007 to 0.19318 |
+| 2 | `model_model3` | 0.13454 | 0.12982 to 0.13926 |
+| 3 | `model_model4` | 0.12264 | 0.11695 to 0.12833 |
+| 4 | `pressure_mean_24h` | 0.09006 | 0.08849 to 0.09163 |
+| 5 | `model_model1` | 0.08685 | 0.08561 to 0.08808 |
+| 6 | `error4_count_24h` | 0.07032 | 0.06925 to 0.07140 |
+| 7 | `hours_since_comp4` | 0.04175 | 0.03870 to 0.04480 |
+| 8 | `pressure_mean_3h` | 0.02852 | 0.02806 to 0.02897 |
+| 9 | `age` | 0.02107 | 0.01755 to 0.02459 |
+| 10 | `error3_count_7d` | 0.00592 | 0.00573 to 0.00610 |
 
 ### comp4
 
 | Rank | Feature | Mean PR-AUC drop | 95% interval |
 |---|---|---|---|
-| 1 | `vibration_mean_24h` | 0.69226 | 0.68128 to 0.70325 |
-| 2 | `error5_count_24h` | 0.48191 | 0.46978 to 0.49403 |
-| 3 | `hours_since_comp4` | 0.01039 | 0.00892 to 0.01186 |
-| 4 | `age` | 0.00747 | 0.00626 to 0.00868 |
-| 5 | `vibration_std_24h` | 0.00207 | 0.00189 to 0.00225 |
-| 6 | `hours_since_comp3` | 0.00104 | 0.00091 to 0.00117 |
-| 7 | `rotate_std_24h` | 0.00051 | 0.00040 to 0.00063 |
-| 8 | `hours_since_comp1` | 0.00026 | 0.00021 to 0.00031 |
-| 9 | `vibration_mean_3h` | 0.00010 | -0.00014 to 0.00033 |
-| 10 | `pressure_std_24h` | 0.00009 | 0.00006 to 0.00013 |
+| 1 | `age` | 0.23533 | 0.23257 to 0.23810 |
+| 2 | `hours_since_comp4` | 0.20703 | 0.20501 to 0.20905 |
+| 3 | `error5_count_24h` | 0.07264 | 0.07211 to 0.07316 |
+| 4 | `vibration_mean_24h` | 0.06917 | 0.06845 to 0.06989 |
+| 5 | `hours_since_comp2` | 0.04279 | 0.04055 to 0.04502 |
+| 6 | `vibration_mean_3h` | 0.03333 | 0.03293 to 0.03374 |
+| 7 | `hours_since_comp3` | 0.02858 | 0.02710 to 0.03006 |
+| 8 | `error1_count_7d` | 0.02668 | 0.02509 to 0.02827 |
+| 9 | `error4_count_7d` | 0.00757 | 0.00717 to 0.00797 |
+| 10 | `model_model3` | 0.00523 | 0.00424 to 0.00622 |
 
 ### Do the maintenance-recency features dominate?
 
@@ -354,10 +387,10 @@ negatives and will look excellent whether or not the model is useful.
 
 | Component | LightGBM | Logistic regression | any error in 24h |
 |---|---|---|---|
-| comp1 | 1.0000 | 0.9999 | 0.9503 |
-| comp2 | 1.0000 | 1.0000 | 0.9530 |
-| comp3 | 1.0000 | 0.9999 | 0.9503 |
-| comp4 | 1.0000 | 1.0000 | 0.9512 |
+| comp1 | 0.7972 | 0.5750 | 0.4966 |
+| comp2 | 0.7626 | 0.6482 | 0.5270 |
+| comp3 | 0.9511 | 0.9275 | 0.5191 |
+| comp4 | 0.9272 | 0.8500 | 0.5135 |
 
 ---
 
@@ -388,7 +421,20 @@ negatives and will look excellent whether or not the model is useful.
 
 ## 8. Test split, evaluated once
 
-This is run 1. The test split has been read exactly once, at `2026-08-09T13:15:39Z`, against model fingerprint `c0179ef3b00a1dd5` and commit `0876f49a7a`.
+**This script has run 2 times, against 2 distinct set(s) of model artefacts.** Reporting that is better than presenting the latest number as though it were the first.
+
+| Run | UTC | Horizon | Commit | Model fingerprint |
+|---|---|---|---|---|
+| 1 | 2026-08-09T13:15:39Z | 24h (back-filled from commit 0876f49) | `0876f49a7a` | `c0179ef3b00a1dd5` |
+| 2 | 2026-08-09T17:15:34Z | 14d (back-filled from commit 16fd2a0) | `16fd2a0aa2` | `69e7570ce7ad5053` |
+
+Each run is at a **different prediction horizon**, which makes them
+different experiments rather than repeated looks at the same one. Run 1
+is the Milestone 3 evaluation at 24 hours, archived in
+`docs/EVALUATION_24h.md`; run 2 is this one, at the 14-day horizon
+derived in `docs/SIGNAL_ANALYSIS.md`. No modelling decision was made
+after seeing either. The horizon changed because of the lead-time
+argument in section 0, not because of a test score.
 
 Thresholds and calibrators come from validation and were not re-derived
 here. No model, hyperparameter or feature decision was made after this
@@ -398,68 +444,68 @@ section was produced.
 
 | Component | majority class (baseline 1) | any error in 24h (baseline 2) | matched error code in 24h (baseline 2b) | error count in 24h (graded variant) | logistic regression (baseline 3) | LightGBM | no-skill floor |
 |---|---|---|---|---|---|---|---|
-| comp1 | 0.005 (0.003-0.006) | 0.051 (0.033-0.069) | 0.189 (0.127-0.249) | 0.093 (0.038-0.187) | 0.910 (0.807-0.977) | 0.992 (0.976-1.000) | 0.00457 |
-| comp2 | 0.007 (0.005-0.009) | 0.083 (0.061-0.103) | 0.271 (0.207-0.332) | 0.698 (0.599-0.780) | 1.000 (1.000-1.000) | 1.000 (1.000-1.000) | 0.00746 |
-| comp3 | 0.003 (0.002-0.005) | 0.035 (0.021-0.051) | 0.144 (0.088-0.202) | 0.038 (0.022-0.063) | 0.995 (0.981-1.000) | 1.000 (1.000-1.000) | 0.00312 |
-| comp4 | 0.004 (0.003-0.006) | 0.045 (0.029-0.064) | 0.532 (0.394-0.665) | 0.066 (0.033-0.134) | 0.999 (0.996-1.000) | 0.997 (0.989-1.000) | 0.00410 |
+| comp1 | 0.054 (0.033-0.076) | 0.058 (0.037-0.082) | 0.069 (0.045-0.095) | 0.058 (0.037-0.082) | 0.190 (0.131-0.249) | 0.193 (0.119-0.282) | 0.05372 |
+| comp2 | 0.114 (0.084-0.145) | 0.128 (0.095-0.163) | 0.141 (0.105-0.176) | 0.167 (0.131-0.203) | 0.253 (0.194-0.313) | 0.267 (0.196-0.348) | 0.11446 |
+| comp3 | 0.047 (0.026-0.066) | 0.049 (0.028-0.071) | 0.060 (0.036-0.086) | 0.049 (0.028-0.071) | 0.377 (0.262-0.494) | 0.375 (0.227-0.521) | 0.04653 |
+| comp4 | 0.058 (0.036-0.081) | 0.060 (0.038-0.084) | 0.096 (0.065-0.125) | 0.063 (0.040-0.090) | 0.248 (0.170-0.323) | 0.363 (0.241-0.478) | 0.05772 |
 
 ### comp1
 
-142,300 rows, 651 positive (0.4575%), 6,030 bootstrap clusters.
+111,100 rows, 5,968 positive (5.3717%), 4,495 bootstrap clusters.
 
 | Series | Threshold | Precision | Recall | F1 | TP | FP | FN | TN |
 |---|---|---|---|---|---|---|---|---|
-| majority class (baseline 1) | 0.5000 | undefined | 0.000 (0.000-0.000) | undefined | 0 | 0 | 651 | 141,649 |
-| any error in 24h (baseline 2) | 0.5000 | 0.051 (0.033-0.069) | 1.000 (1.000-1.000) | 0.097 | 651 | 12,179 | 0 | 129,470 |
-| matched error code in 24h (baseline 2b) | 0.5000 | 0.189 (0.127-0.249) | 1.000 (1.000-1.000) | 0.317 | 651 | 2,800 | 0 | 138,849 |
-| error count in 24h (graded variant) | 0.5000 | 0.051 (0.033-0.069) | 1.000 (1.000-1.000) | 0.097 | 651 | 12,179 | 0 | 129,470 |
-| logistic regression (baseline 3) | 0.2169 | 0.783 (0.668-0.874) | 0.997 (0.991-1.000) | 0.877 | 649 | 180 | 2 | 141,469 |
-| LightGBM | 0.9900 | 0.972 (0.921-0.999) | 0.995 (0.988-1.000) | 0.983 | 648 | 19 | 3 | 141,630 |
+| majority class (baseline 1) | 0.5000 | undefined | 0.000 (0.000-0.000) | undefined | 0 | 0 | 5,968 | 105,132 |
+| any error in 24h (baseline 2) | 0.5000 | 0.086 (0.055-0.121) | 0.141 (0.117-0.173) | 0.106 | 839 | 8,955 | 5,129 | 96,177 |
+| matched error code in 24h (baseline 2b) | 0.5000 | 0.208 (0.135-0.288) | 0.097 (0.076-0.123) | 0.132 | 576 | 2,192 | 5,392 | 102,940 |
+| error count in 24h (graded variant) | 0.5000 | 0.086 (0.055-0.121) | 0.141 (0.117-0.173) | 0.106 | 839 | 8,955 | 5,129 | 96,177 |
+| logistic regression (baseline 3) | 0.3079 | 0.688 (0.527-0.819) | 0.084 (0.065-0.108) | 0.149 | 499 | 226 | 5,469 | 104,906 |
+| LightGBM | 0.8800 | 0.472 (0.321-0.629) | 0.067 (0.048-0.091) | 0.117 | 398 | 445 | 5,570 | 104,687 |
 
 ![PR curve, comp1, test](images/pr_comp1_test.png)
 
 ### comp2
 
-142,300 rows, 1,062 positive (0.7463%), 6,045 bootstrap clusters.
+111,100 rows, 12,716 positive (11.4455%), 4,248 bootstrap clusters.
 
 | Series | Threshold | Precision | Recall | F1 | TP | FP | FN | TN |
 |---|---|---|---|---|---|---|---|---|
-| majority class (baseline 1) | 0.5000 | undefined | 0.000 (0.000-0.000) | undefined | 0 | 0 | 1,062 | 141,238 |
-| any error in 24h (baseline 2) | 0.5000 | 0.083 (0.061-0.103) | 1.000 (1.000-1.000) | 0.153 | 1,062 | 11,768 | 0 | 129,470 |
-| matched error code in 24h (baseline 2b) | 0.5000 | 0.271 (0.207-0.332) | 1.000 (1.000-1.000) | 0.427 | 1,062 | 2,851 | 0 | 138,387 |
-| error count in 24h (graded variant) | 0.5000 | 0.083 (0.061-0.103) | 1.000 (1.000-1.000) | 0.153 | 1,062 | 11,768 | 0 | 129,470 |
-| logistic regression (baseline 3) | 0.5800 | 1.000 (1.000-1.000) | 1.000 (1.000-1.000) | 1.000 | 1,062 | 0 | 0 | 141,238 |
-| LightGBM | 0.9900 | 1.000 (1.000-1.000) | 1.000 (1.000-1.000) | 1.000 | 1,062 | 0 | 0 | 141,238 |
+| majority class (baseline 1) | 0.5000 | undefined | 0.000 (0.000-0.000) | undefined | 0 | 0 | 12,716 | 98,384 |
+| any error in 24h (baseline 2) | 0.5000 | 0.202 (0.148-0.257) | 0.156 (0.135-0.175) | 0.176 | 1,978 | 7,816 | 10,738 | 90,568 |
+| matched error code in 24h (baseline 2b) | 0.5000 | 0.395 (0.305-0.479) | 0.094 (0.082-0.105) | 0.152 | 1,194 | 1,826 | 11,522 | 96,558 |
+| error count in 24h (graded variant) | 0.5000 | 0.202 (0.148-0.257) | 0.156 (0.135-0.175) | 0.176 | 1,978 | 7,816 | 10,738 | 90,568 |
+| logistic regression (baseline 3) | 0.3938 | 0.124 (0.090-0.157) | 0.814 (0.747-0.879) | 0.215 | 10,350 | 73,437 | 2,366 | 24,947 |
+| LightGBM | 0.0060 | 0.171 (0.126-0.214) | 0.969 (0.913-1.000) | 0.291 | 12,322 | 59,579 | 394 | 38,805 |
 
 ![PR curve, comp2, test](images/pr_comp2_test.png)
 
 ### comp3
 
-142,300 rows, 444 positive (0.3120%), 6,020 bootstrap clusters.
+111,100 rows, 5,169 positive (4.6526%), 4,518 bootstrap clusters.
 
 | Series | Threshold | Precision | Recall | F1 | TP | FP | FN | TN |
 |---|---|---|---|---|---|---|---|---|
-| majority class (baseline 1) | 0.5000 | undefined | 0.000 (0.000-0.000) | undefined | 0 | 0 | 444 | 141,856 |
-| any error in 24h (baseline 2) | 0.5000 | 0.035 (0.021-0.051) | 1.000 (1.000-1.000) | 0.067 | 444 | 12,386 | 0 | 129,470 |
-| matched error code in 24h (baseline 2b) | 0.5000 | 0.144 (0.088-0.202) | 1.000 (1.000-1.000) | 0.251 | 444 | 2,645 | 0 | 139,211 |
-| error count in 24h (graded variant) | 0.5000 | 0.035 (0.021-0.051) | 1.000 (1.000-1.000) | 0.067 | 444 | 12,386 | 0 | 129,470 |
-| logistic regression (baseline 3) | 0.2573 | 0.965 (0.914-0.998) | 1.000 (1.000-1.000) | 0.982 | 444 | 16 | 0 | 141,840 |
-| LightGBM | 0.9900 | 1.000 (1.000-1.000) | 1.000 (1.000-1.000) | 1.000 | 444 | 0 | 0 | 141,856 |
+| majority class (baseline 1) | 0.5000 | undefined | 0.000 (0.000-0.000) | undefined | 0 | 0 | 5,169 | 105,931 |
+| any error in 24h (baseline 2) | 0.5000 | 0.065 (0.036-0.099) | 0.123 (0.096-0.152) | 0.085 | 638 | 9,156 | 4,531 | 96,775 |
+| matched error code in 24h (baseline 2b) | 0.5000 | 0.202 (0.120-0.287) | 0.086 (0.067-0.105) | 0.121 | 444 | 1,751 | 4,725 | 104,180 |
+| error count in 24h (graded variant) | 0.5000 | 0.065 (0.036-0.099) | 0.123 (0.096-0.152) | 0.085 | 638 | 9,156 | 4,531 | 96,775 |
+| logistic regression (baseline 3) | 0.1258 | 0.258 (0.163-0.348) | 0.774 (0.669-0.871) | 0.387 | 4,000 | 11,488 | 1,169 | 94,443 |
+| LightGBM | 0.0015 | 0.305 (0.191-0.397) | 0.944 (0.812-1.000) | 0.461 | 4,880 | 11,105 | 289 | 94,826 |
 
 ![PR curve, comp3, test](images/pr_comp3_test.png)
 
 ### comp4
 
-142,300 rows, 583 positive (0.4097%), 6,026 bootstrap clusters.
+111,100 rows, 6,413 positive (5.7723%), 4,477 bootstrap clusters.
 
 | Series | Threshold | Precision | Recall | F1 | TP | FP | FN | TN |
 |---|---|---|---|---|---|---|---|---|
-| majority class (baseline 1) | 0.5000 | undefined | 0.000 (0.000-0.000) | undefined | 0 | 0 | 583 | 141,717 |
-| any error in 24h (baseline 2) | 0.5000 | 0.045 (0.029-0.064) | 1.000 (1.000-1.000) | 0.087 | 583 | 12,247 | 0 | 129,470 |
-| matched error code in 24h (baseline 2b) | 0.5000 | 0.532 (0.394-0.665) | 1.000 (1.000-1.000) | 0.694 | 583 | 513 | 0 | 141,204 |
-| error count in 24h (graded variant) | 0.5000 | 0.045 (0.029-0.064) | 1.000 (1.000-1.000) | 0.087 | 583 | 12,247 | 0 | 129,470 |
-| logistic regression (baseline 3) | 0.2876 | 0.970 (0.929-0.997) | 1.000 (1.000-1.000) | 0.985 | 583 | 18 | 0 | 141,699 |
-| LightGBM | 0.9900 | 0.990 (0.962-1.000) | 1.000 (1.000-1.000) | 0.995 | 583 | 6 | 0 | 141,711 |
+| majority class (baseline 1) | 0.5000 | undefined | 0.000 (0.000-0.000) | undefined | 0 | 0 | 6,413 | 104,687 |
+| any error in 24h (baseline 2) | 0.5000 | 0.075 (0.044-0.111) | 0.115 (0.085-0.149) | 0.091 | 739 | 9,055 | 5,674 | 95,632 |
+| matched error code in 24h (baseline 2b) | 0.5000 | 0.564 (0.405-0.705) | 0.076 (0.068-0.088) | 0.134 | 486 | 376 | 5,927 | 104,311 |
+| error count in 24h (graded variant) | 0.5000 | 0.075 (0.044-0.111) | 0.115 (0.085-0.149) | 0.091 | 739 | 9,055 | 5,674 | 95,632 |
+| logistic regression (baseline 3) | 0.0450 | 0.138 (0.088-0.188) | 0.952 (0.891-0.991) | 0.242 | 6,104 | 38,003 | 309 | 66,684 |
+| LightGBM | 0.0185 | 0.231 (0.153-0.301) | 0.996 (0.989-1.000) | 0.375 | 6,388 | 21,252 | 25 | 83,435 |
 
 ![PR curve, comp4, test](images/pr_comp4_test.png)
 
@@ -470,10 +516,10 @@ Unlike the validation figures in section 4, these are genuinely out of sample.
 
 | Component | Brier, raw | Brier, isotonic (fitted on val) | Base-rate reference |
 |---|---|---|---|
-| comp1 | 0.000189 | 0.000189 | 0.004554 |
-| comp2 | 0.000000 | 0.000000 | 0.007407 |
-| comp3 | 0.000000 | 0.000000 | 0.003110 |
-| comp4 | 0.000042 | 0.000066 | 0.004080 |
+| comp1 | 0.056377 | 0.049861 | 0.050832 |
+| comp2 | 0.103822 | 0.098454 | 0.101355 |
+| comp3 | 0.042223 | 0.036289 | 0.044361 |
+| comp4 | 0.052437 | 0.044787 | 0.054391 |
 
 ![Reliability, comp1, test](images/reliability_comp1_test.png)
 ![Reliability, comp2, test](images/reliability_comp2_test.png)
@@ -484,10 +530,10 @@ Unlike the validation figures in section 4, these are genuinely out of sample.
 
 | Component | LightGBM | Logistic regression | matched error code |
 |---|---|---|---|
-| comp1 | 1.0000 | 0.9997 | 0.9901 |
-| comp2 | 1.0000 | 1.0000 | 0.9899 |
-| comp3 | 1.0000 | 1.0000 | 0.9907 |
-| comp4 | 1.0000 | 1.0000 | 0.9982 |
+| comp1 | 0.7989 | 0.7115 | 0.5378 |
+| comp2 | 0.7008 | 0.6087 | 0.5377 |
+| comp3 | 0.9523 | 0.9305 | 0.5347 |
+| comp4 | 0.9192 | 0.8462 | 0.5361 |
 
 ### Anything wanted after seeing these numbers
 

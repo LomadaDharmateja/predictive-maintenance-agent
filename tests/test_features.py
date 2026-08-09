@@ -174,8 +174,12 @@ def test_last_observed_failure_matches_the_data(real_store, built_db):
 
 
 def test_trim_boundary_is_the_horizon_before_the_last_observed_failure():
+    """Derived, not a literal. This assertion used to pin 2015-12-30 06:00, which
+    was only true while the horizon was 24 hours; moving the horizon to 14 days in
+    Milestone 3B would have failed it for the right reason but the wrong cause."""
     assert MAX_PREDICTION_TIME == LAST_OBSERVED_FAILURE - LABEL_HORIZON
-    assert MAX_PREDICTION_TIME == pd.Timestamp("2015-12-30 06:00:00")
+    assert MAX_PREDICTION_TIME < LAST_OBSERVED_FAILURE
+    assert (LAST_OBSERVED_FAILURE - MAX_PREDICTION_TIME) == LABEL_HORIZON
 
 
 def test_no_split_extends_past_the_trim_boundary(real_store):

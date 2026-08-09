@@ -35,7 +35,12 @@ from src.eval.thresholds import (
     select_threshold,
     sensitivity_table,
 )
-from src.features.config import COMPONENTS, ERROR_IDS, LABEL_HORIZON
+from src.features.config import COMPONENTS, ERROR_IDS
+
+#: These tests are about the clustering and metric mechanics, not about the
+#: project's operational horizon. Pinned locally so moving LABEL_HORIZON (24h in
+#: Milestone 3, 14 days in 3B) cannot silently reshape the fixture.
+CLUSTER_HORIZON = pd.Timedelta(hours=24)
 
 
 # ----------------------------------------------------------------------
@@ -104,7 +109,7 @@ def clustering_frame() -> tuple[pd.DataFrame, pd.DataFrame]:
     for machine in machines:
         failure_at = failure_times[machine]
         for when in times:
-            positive = int(failure_at - LABEL_HORIZON <= when < failure_at)
+            positive = int(failure_at - CLUSTER_HORIZON <= when < failure_at)
             rows.append(
                 {"machineID": machine, "datetime": when, "label_comp1": positive}
             )
@@ -122,7 +127,7 @@ def clustering_frame() -> tuple[pd.DataFrame, pd.DataFrame]:
 
 def test_positive_rows_from_one_event_share_a_cluster(clustering_frame):
     frame, failures = clustering_frame
-    clusters = event_clusters(frame, "comp1", failures, LABEL_HORIZON)
+    clusters = event_clusters(frame, "comp1", failures, CLUSTER_HORIZON)
     positive = frame["label_comp1"].to_numpy().astype(bool)
 
     assert positive.sum() == 6 * 24
@@ -134,7 +139,7 @@ def test_positive_rows_from_one_event_share_a_cluster(clustering_frame):
 
 def test_negative_rows_cluster_by_machine_day(clustering_frame):
     frame, failures = clustering_frame
-    clusters = event_clusters(frame, "comp1", failures, LABEL_HORIZON)
+    clusters = event_clusters(frame, "comp1", failures, CLUSTER_HORIZON)
     negative = ~frame["label_comp1"].to_numpy().astype(bool)
     machine_days = (
         frame.loc[negative]
@@ -150,7 +155,7 @@ def test_clustered_bootstrap_is_wider_than_a_row_bootstrap(clustering_frame):
     EVALUATION.md are overstating precision."""
     frame, failures = clustering_frame
     y = frame["label_comp1"].to_numpy()
-    clustered = event_clusters(frame, "comp1", failures, LABEL_HORIZON)
+    clustered = event_clusters(frame, "comp1", failures, CLUSTER_HORIZON)
     per_row = np.arange(len(frame))
 
     # Scores are drawn per cluster, not per row. That is the situation the

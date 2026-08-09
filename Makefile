@@ -12,6 +12,10 @@
 
 PYTHON ?= python
 
+# scripts/ import from src/, so the repo root has to be on the path when they are
+# run as files rather than as modules.
+export PYTHONPATH := .
+
 RAW        := data/raw
 DB         := data/pdm.db
 GENERATED  := data/generated
@@ -66,6 +70,22 @@ evaluate: $(MODELS)
 ## evaluate-test: the one-shot test-split evaluation. Run once, at the very end.
 evaluate-test:
 	$(PYTHON) -m src.eval.test_evaluation
+
+## render: regenerate docs/EVALUATION.md from persisted JSON, reading no split
+render:
+	$(PYTHON) -m src.eval.render
+
+## horizon-sweep: PR-AUC against prediction horizon, validation only
+horizon-sweep:
+	$(PYTHON) scripts/horizon_sweep.py
+
+## horizon-decision: bootstrap intervals, 30d diagnostic, detection lead times
+horizon-decision:
+	$(PYTHON) scripts/horizon_decision.py
+
+## signal-analysis: characterise the fault signature and write docs/SIGNAL_ANALYSIS.md
+signal-analysis:
+	$(PYTHON) scripts/signal_analysis.py
 
 ## case-study: reproduce the v1 leakage numbers from archive/v1-app/
 case-study:

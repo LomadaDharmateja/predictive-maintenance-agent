@@ -49,12 +49,50 @@ the model, which is what justifies keeping partial windows instead of trimming a
 warm-up. Without it, a 1-sample mean and a 24-sample mean are indistinguishable inputs.
 
 **Their honest limitation.** They vary only over the first 168 hours of `train` and are
-constant everywhere after that: 3, 24 and 168 for every row of validation and test. A
-model cannot use them outside the warm-up region, and their permutation importance on
-validation will be exactly zero by construction. That is expected, not a defect —
-they exist to mark a specific 0.27% of rows, and
+constant everywhere after that: 3, 24 and 168 for every row of validation and test.
+A model cannot use them outside the warm-up region, so their permutation importance on
+validation is exactly zero by construction, not by accident.
 `tests/test_features.py::test_window_coverage_is_constant_after_the_widest_window_fills`
-records it so nobody later reads a zero importance as a bug.
+records that so nobody later reads a zero as a bug.
+
+Measured on the shipped splits:
+
+| | `window_coverage_3h` | `window_coverage_24h` | `window_coverage_7d` |
+|---|---|---|---|
+| Distinct values in `train` | 3 | 24 | 168 |
+| Distinct values in `val` / `test` | 1 | 1 | 1 |
+
+16,700 training rows (2.56%) have a partial 7-day window. Zero validation or test rows
+do.
+
+### Recommendation: keep them
+
+**This recommendation was reversed by measurement.** The first pass, made against the
+24-hour results, said drop: the models were spending 4.4% to 9.4% of their split budget
+on features informative for 2.56% of training rows and for nothing at inference.
+
+That evidence came from the wrong horizon. Re-measured at the 14-day operational
+horizon, both halves of the argument fail.
+
+| Component | Split share on coverage, 24h | Split share, 14d | Validation PR-AUC with (38 features) | Without (35) | Delta |
+|---|---|---|---|---|---|
+| comp1 | 6.4% | 1.15% | 0.3573 | 0.2911 | **-0.0662** |
+| comp2 | 9.4% | 1.34% | 0.3821 | 0.3797 | -0.0023 |
+| comp3 | 4.4% | 1.64% | 0.3822 | 0.4009 | +0.0187 |
+| comp4 | 8.7% | 1.27% | 0.3601 | 0.3428 | -0.0173 |
+
+The cost is roughly a fifth of what it looked like — 1.2% to 1.6% of splits, not 4% to
+9% — and dropping the features *hurts* three components out of four, comp1 badly. The
+benefit that was "real in principle but unmeasured" is now measured, and it is real.
+
+The reversal has a straightforward cause. At a 24-hour horizon the warm-up region is
+2,300 labelled rows and the model can afford to ignore it. At 14 days the label window
+is fourteen times wider, so the same partial-window rows carry far more of the positive
+mass, and telling a 1-sample mean from a 24-sample one starts to matter. The earlier
+measurement was not wrong; it was taken on a horizon where the question did not arise.
+
+**Keep them.** Revisit only if the warm-up rows are ever trimmed, at which point the
+features become constant everywhere and should go with them.
 
 All feature columns are `float64`, including the counts and the model indicators. One
 dtype across the matrix means a consumer cannot silently get integer division or an
@@ -99,7 +137,7 @@ and `as_of`. There is no seed because there is nothing to seed. Row order is
 
 | Column | Definition |
 |---|---|
-| `label_comp1` .. `label_comp4` | 1 if a failure of that component occurs for that machine in `(t, t + 24h]`, else 0 |
+| `label_comp1` .. `label_comp4` | 1 if a failure of that component occurs for that machine in `(t, t + 14 days]`, else 0 |
 
 Four independent binary problems, not one multiclass problem: the downstream agent needs
 a per-component probability to decide which part to reserve.
@@ -143,14 +181,15 @@ forward direction is constrained by the split.
 
 ## Positive counts
 
-Measured, not estimated.
+Measured, not estimated, at the **14-day** operational horizon
+(`docs/SIGNAL_ANALYSIS.md` section 4). The 24-hour figures are in
+`docs/EVALUATION_24h.md`.
 
 | Split | Rows | comp1 | comp2 | comp3 | comp4 | any component |
 |---|---|---|---|---|---|---|
-| train | 652,200 | 3,645 (0.559%) | 4,479 (0.687%) | 2,457 (0.377%) | 3,303 (0.506%) | 13,074 (2.005%) |
-| val | 72,000 | 192 (0.267%) | 624 (0.867%) | 186 (0.258%) | 336 (0.467%) | 1,296 (1.800%) |
-| test | 142,300 | 651 (0.457%) | 1,062 (0.746%) | 444 (0.312%) | 583 (0.410%) | 2,590 (1.820%) |
-| **all** | **866,500** | **4,488 (0.518%)** | **6,165 (0.711%)** | **3,087 (0.356%)** | **4,222 (0.487%)** | **16,960 (1.957%)** |
+| train | 621,000 | 46,755 (7.529%) | 59,349 (9.557%) | 31,944 (5.144%) | 43,263 (6.967%) | 170,919 (27.523%) |
+| val | 40,800 | 1,038 (2.544%) | 6,084 (14.912%) | 1,272 (3.118%) | 2,640 (6.471%) | 10,926 (26.779%) |
+| test | 111,100 | 5,968 (5.372%) | 12,716 (11.446%) | 5,169 (4.653%) | 6,413 (5.772%) | 28,602 (25.744%) |
 
 The test split's 2,590 positive rows derive from roughly 127 distinct failure events.
 Recall estimated on that carries wide uncertainty and must be reported with an interval,

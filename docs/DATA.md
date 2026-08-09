@@ -125,14 +125,45 @@ By component:
 ### Label definition
 
 A telemetry row at time `t` for machine `m` is labelled positive for component `k` if
-a failure of `k` on `m` occurs in the interval `(t, t + 24h]`.
+a failure of `k` on `m` occurs in the interval `(t, t + 14 days]`.
+
+### The horizon, and why it is 14 days
+
+**The horizon is derived from the decision the model serves, not inherited.**
+Milestone 3 used 24 hours because that is the standard framing of this dataset, and
+scored PR-AUC 1.000 with controls that rule out leakage and memorisation. It was still
+the wrong horizon: supplier lead times in section 6 run 10 to 34 days, median 23, so a
+one-day warning cannot inform a decision whose action takes three weeks.
+
+14 days is the longest horizon at which LightGBM still beats the matched-error-code
+baseline with non-overlapping bootstrap intervals on all four components. At 30 days --
+the shortest horizon covering the median lead time -- the intervals overlap for comp1
+and comp2, so the model is no longer established as better than a spreadsheet rule
+there.
+
+**No horizon satisfies both constraints, and that is the finding.** Predictability caps
+the horizon at 14 days; the lead-time requirement starts at 23. They do not intersect.
+Worse, the model's *effective* detection lead -- the gap between its score crossing the
+threshold and the failure -- is a median of 14 days for comp2, comp3 and comp4 but only
+24 hours for comp1. Crossed against the parts list, **1 of 9 parts can be ordered in
+time**.
+
+The consequence for later milestones: the agent's parts-ordering tool must work from
+stock on hand and consumption rates, not from predictions. The model can say what will
+fail and roughly when; it cannot buy enough notice to order most of the parts.
+
+Full derivation, including the horizon sweep and the three-constraint assessment, is in
+`docs/SIGNAL_ANALYSIS.md`. The 24-hour results are archived in
+`docs/EVALUATION_24h.md`; they are kept because the reason they are useless is the most
+valuable result in the project.
 
 This is modelled as **four independent binary problems**, one per component, rather
 than a single multiclass problem — the downstream agent needs a per-component
 probability in order to decide which part to reserve.
 
-Positive rates under this labelling, **measured** over the 866,500 rows of the
-modelling set (`make features`), no longer derived:
+Positive rates at the **24-hour** horizon, measured over the 866,500 rows that
+labelling produced. Retained because `docs/EVALUATION_24h.md` reports against them;
+the 14-day rates are in `docs/FEATURES.md`:
 
 | Component | Positive rows | Rate |
 |---|---|---|

@@ -55,6 +55,7 @@ from src.eval.validate import (
     load_failures,
     load_model,
 )
+from src.eval.horizons import horizon_label
 from src.features.config import COMPONENTS, LABEL_HORIZON
 from src.models.train import SUMMARY, git_commit
 
@@ -72,7 +73,7 @@ def model_fingerprint(models_dir: Path = MODELS_DIR) -> str:
     return digest.hexdigest()
 
 
-def record_run(fingerprint: str, data_hash: str) -> list[dict]:
+def record_run(fingerprint: str, data_hash: str, horizon: str) -> list[dict]:
     """Append this run to the manifest and return the full history.
 
     Note that this makes `build_manifest.json` non-deterministic in its
@@ -89,6 +90,7 @@ def record_run(fingerprint: str, data_hash: str) -> list[dict]:
             "git_commit": git_commit(),
             "model_fingerprint": fingerprint,
             "test_data_sha256": data_hash,
+            "horizon": horizon,
         }
     )
     payload["test_evaluation"] = {"runs": history}
@@ -201,7 +203,9 @@ def evaluate_test(models_dir: Path = MODELS_DIR, quiet: bool = False) -> dict:
     fingerprint = model_fingerprint(models_dir)
     summary = json.loads(SUMMARY.read_text(encoding="utf-8")) if SUMMARY.exists() else {}
     data_hash = summary.get("data_content_hash", {}).get("test", "unknown")
-    results["runs"] = record_run(fingerprint, data_hash)
+    results["runs"] = record_run(
+        fingerprint, data_hash, horizon_label(LABEL_HORIZON)
+    )
     results["model_fingerprint"] = fingerprint
     return results
 
@@ -222,20 +226,34 @@ def render(results: dict) -> str:
             f"`{runs[0]['git_commit'][:10]}`."
         )
     else:
+        horizons = {run.get("horizon", "24h (Milestone 3)") for run in runs}
         add(
             f"**This script has run {len(runs)} times, against "
-            f"{len(distinct)} distinct set(s) of model artefacts.** The milestone "
-            "asks for one run; saying so is better than presenting the latest "
-            "number as though it were the first. Full log:"
+            f"{len(distinct)} distinct set(s) of model artefacts.** Reporting that is "
+            "better than presenting the latest number as though it were the first."
         )
         add("")
-        add("| Run | UTC | Commit | Model fingerprint |")
-        add("|---|---|---|---|")
+        add("| Run | UTC | Horizon | Commit | Model fingerprint |")
+        add("|---|---|---|---|---|")
         for run in runs:
             add(
-                f"| {run['run']} | {run['utc']} | `{run['git_commit'][:10]}` "
+                f"| {run['run']} | {run['utc']} "
+                f"| {run.get('horizon', '24h (not recorded; back-filled from the commit)')} "
+                f"| `{run['git_commit'][:10]}` "
                 f"| `{run['model_fingerprint'][:16]}` |"
             )
+        add("")
+        if len(horizons) == len(runs):
+            add("Each run is at a **different prediction horizon**, which makes them")
+            add("different experiments rather than repeated looks at the same one. Run 1")
+            add("is the Milestone 3 evaluation at 24 hours, archived in")
+            add("`docs/EVALUATION_24h.md`; run 2 is this one, at the 14-day horizon")
+            add("derived in `docs/SIGNAL_ANALYSIS.md`. No modelling decision was made")
+            add("after seeing either. The horizon changed because of the lead-time")
+            add("argument in section 0, not because of a test score.")
+        else:
+            add("**Two or more runs share a horizon.** That is a repeated look at the")
+            add("same question and the later numbers should be treated with suspicion.")
     add("")
     add("Thresholds and calibrators come from validation and were not re-derived")
     add("here. No model, hyperparameter or feature decision was made after this")

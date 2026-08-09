@@ -1,75 +1,75 @@
 {
   "features": {
     "test": {
-      "any_component_positive": 2590,
-      "any_component_positive_rate": 0.01820098383696416,
+      "any_component_positive": 28602,
+      "any_component_positive_rate": 0.25744374437443746,
       "first": "2015-11-01 00:00:00",
-      "last": "2015-12-30 06:00:00",
+      "last": "2015-12-17 06:00:00",
       "machines": 100,
       "path": "data/generated/features_test.parquet",
       "positive_rate": {
-        "comp1": 0.004574841883345046,
-        "comp2": 0.007463106113843991,
-        "comp3": 0.0031201686577652845,
-        "comp4": 0.00409697821503865
+        "comp1": 0.05371737173717372,
+        "comp2": 0.11445544554455446,
+        "comp3": 0.04652565256525652,
+        "comp4": 0.057722772277227725
       },
       "positives": {
-        "comp1": 651,
-        "comp2": 1062,
-        "comp3": 444,
-        "comp4": 583
+        "comp1": 5968,
+        "comp2": 12716,
+        "comp3": 5169,
+        "comp4": 6413
       },
-      "prediction_times": 1423,
-      "rows": 142300,
-      "sha256": "cc020c2b4c93eedd0d4ebf5faae195db954d7996ee0d63a72338407b2f3773e3",
+      "prediction_times": 1111,
+      "rows": 111100,
+      "sha256": "9b243565db806aad68cab2545a7b505533a5f6af51411f950fd501f3a6477e25",
       "split": "test"
     },
     "train": {
-      "any_component_positive": 13074,
-      "any_component_positive_rate": 0.020045998160073596,
+      "any_component_positive": 170919,
+      "any_component_positive_rate": 0.275231884057971,
       "first": "2015-01-01 06:00:00",
-      "last": "2015-09-29 23:00:00",
+      "last": "2015-09-16 23:00:00",
       "machines": 100,
       "path": "data/generated/features_train.parquet",
       "positive_rate": {
-        "comp1": 0.0055887764489420426,
-        "comp2": 0.00686752529898804,
-        "comp3": 0.003767249310027599,
-        "comp4": 0.005064397424103036
+        "comp1": 0.07528985507246377,
+        "comp2": 0.09557004830917874,
+        "comp3": 0.05143961352657005,
+        "comp4": 0.06966666666666667
       },
       "positives": {
-        "comp1": 3645,
-        "comp2": 4479,
-        "comp3": 2457,
-        "comp4": 3303
+        "comp1": 46755,
+        "comp2": 59349,
+        "comp3": 31944,
+        "comp4": 43263
       },
-      "prediction_times": 6522,
-      "rows": 652200,
-      "sha256": "5058cc5b5cad928169cb59b1722b829405ca8af32f5542666fe36c49fe70d12e",
+      "prediction_times": 6210,
+      "rows": 621000,
+      "sha256": "63c78b3f9e534e19e81063564c8c0e9762b090df9ef5b84c04b6216bafeb7132",
       "split": "train"
     },
     "val": {
-      "any_component_positive": 1296,
-      "any_component_positive_rate": 0.018,
+      "any_component_positive": 10926,
+      "any_component_positive_rate": 0.26779411764705885,
       "first": "2015-10-01 00:00:00",
-      "last": "2015-10-30 23:00:00",
+      "last": "2015-10-17 23:00:00",
       "machines": 100,
       "path": "data/generated/features_val.parquet",
       "positive_rate": {
-        "comp1": 0.0026666666666666666,
-        "comp2": 0.008666666666666666,
-        "comp3": 0.0025833333333333333,
-        "comp4": 0.004666666666666667
+        "comp1": 0.025441176470588234,
+        "comp2": 0.14911764705882352,
+        "comp3": 0.031176470588235295,
+        "comp4": 0.06470588235294118
       },
       "positives": {
-        "comp1": 192,
-        "comp2": 624,
-        "comp3": 186,
-        "comp4": 336
+        "comp1": 1038,
+        "comp2": 6084,
+        "comp3": 1272,
+        "comp4": 2640
       },
-      "prediction_times": 720,
-      "rows": 72000,
-      "sha256": "b3dd5d2fb97f081f54202b2d10ffe80e87c864c74f485a0278a7b3f0e0dd0637",
+      "prediction_times": 408,
+      "rows": 40800,
+      "sha256": "48adff12ab60b8f27e4e69b424da34f30af72f76057a03922abf2a97e0fe9442",
       "split": "val"
     }
   },
@@ -104,10 +104,19 @@
     "runs": [
       {
         "git_commit": "0876f49a7ac6e63a39661be4ef0159c05a602863",
+        "horizon": "24h (back-filled from commit 0876f49)",
         "model_fingerprint": "c0179ef3b00a1dd54f5edbb466f35872223a702d08fda8ef387dc4d38d0ac7d5",
         "run": 1,
         "test_data_sha256": "cc020c2b4c93eedd0d4ebf5faae195db954d7996ee0d63a72338407b2f3773e3",
         "utc": "2026-08-09T13:15:39Z"
+      },
+      {
+        "git_commit": "16fd2a0aa2df69629087b547b3baea67a0438dd8",
+        "horizon": "14d (back-filled from commit 16fd2a0)",
+        "model_fingerprint": "69e7570ce7ad50535b9da14ebf69859a268c7da8497397c4454b769d7e914bd8",
+        "run": 2,
+        "test_data_sha256": "9b243565db806aad68cab2545a7b505533a5f6af51411f950fd501f3a6477e25",
+        "utc": "2026-08-09T17:15:34Z"
       }
     ]
   }
