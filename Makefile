@@ -31,7 +31,8 @@ FEATURE_SOURCES := src/features/config.py src/features/store.py \
                    src/features/compute.py src/features/build.py
 
 .PHONY: all data features train evaluate evaluate-test case-study inventory test \
-        verify investigate clean distclean help fetch-data fetch-data-verify
+        verify investigate clean distclean help fetch-data fetch-data-verify \
+        worksheet
 
 all: features
 
@@ -90,6 +91,10 @@ signal-analysis:
 ## calibration-check: held-out Brier skill for the shipped model
 calibration-check:
 	$(PYTHON) scripts/calibration_check.py
+
+## worksheet: report 15 chosen validation machine-hours to evals/WORKSHEET.md
+worksheet:
+	$(PYTHON) evals/make_worksheet.py
 
 ## eval-validate: check evals/scenarios.yaml against the required distribution
 eval-validate:
