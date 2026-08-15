@@ -62,14 +62,16 @@ Measured on the shipped splits:
 | Distinct values in `train` | 3 | 24 | 168 |
 | Distinct values in `val` / `test` | 1 | 1 | 1 |
 
-16,700 training rows (2.56%) have a partial 7-day window. Zero validation or test rows
-do.
+16,700 training rows (2.69% of `train`) have a partial 7-day window. Zero validation or
+test rows do.
 
 ### Recommendation: keep them
 
 **This recommendation was reversed by measurement.** The first pass, made against the
 24-hour results, said drop: the models were spending 4.4% to 9.4% of their split budget
-on features informative for 2.56% of training rows and for nothing at inference.
+on features informative for 2.56% of training rows and for nothing at inference. That
+2.56% is the 24-hour-era figure, against a 652,200-row `train`; the same 16,700 rows are
+2.69% of the 14-day `train`, which is the figure quoted above.
 
 That evidence came from the wrong horizon. Re-measured at the 14-day operational
 horizon, both halves of the argument fail.
@@ -111,7 +113,7 @@ The `window_coverage_*` features above exist so a model can see this rather than
 having to infer it. The alternative — discarding the first 23 hours so every window is full — would delete
 all 18 of the anomalous `2015-01-02 03:00` failures described in `docs/DATA.md` section
 5.1, which is 2.4% of all positives. Partial windows affect 23 hours x 100 machines =
-2,300 rows, 0.27% of the modelling set, all inside `train`. Keeping the positives is
+2,300 rows, 0.30% of the 772,900-row modelling set, all inside `train`. Keeping the positives is
 worth the mild distribution shift, but it is a choice and it is recorded here rather
 than left implicit.
 
@@ -143,7 +145,7 @@ Four independent binary problems, not one multiclass problem: the downstream age
 a per-component probability to decide which part to reserve.
 
 The window is open at `t` — a failure happening *now* is not a prediction — and closed at
-`t + 24h`. Both edges are pinned by tests.
+`t + 14 days`. Both edges are pinned by tests.
 
 `int8`, so the label block is 4 bytes per row rather than 32.
 
@@ -157,18 +159,24 @@ scanner itself is tested against a planted call so it cannot pass by being broke
 
 | Split | Period | Prediction times | Rows | First | Last |
 |---|---|---|---|---|---|
-| train | 2015-01-01 to 2015-09-30 | 6,522 | 652,200 | 2015-01-01 06:00 | 2015-09-29 23:00 |
-| val | 2015-10-01 to 2015-10-31 | 720 | 72,000 | 2015-10-01 00:00 | 2015-10-30 23:00 |
-| test | 2015-11-01 to 2015-12-31 | 1,423 | 142,300 | 2015-11-01 00:00 | 2015-12-30 06:00 |
+| train | 2015-01-01 to 2015-09-30 | 6,210 | 621,000 | 2015-01-01 06:00 | 2015-09-16 23:00 |
+| val | 2015-10-01 to 2015-10-31 | 408 | 40,800 | 2015-10-01 00:00 | 2015-10-17 23:00 |
+| test | 2015-11-01 to 2015-12-31 | 1,111 | 111,100 | 2015-11-01 00:00 | 2015-12-17 06:00 |
+
+Read from `data/generated/build_manifest.json` under `features`, which `make features`
+writes. The `Period` column is the split *definition* from `src/features/config.py`;
+the last prediction time falls short of it by the embargo.
 
 Two independent trims produce those end points:
 
-- **Embargo**, 24 hours, dropped from the end of every split. It equals the label
+- **Embargo**, 14 days, dropped from the end of every split. It equals the label
   horizon and is derived from it in code, not written as a separate number. Without it
-  a training row's label window reaches into validation.
-- **Label observability**, a global cutoff at `2015-12-30 06:00` = the last observed
-  failure minus the horizon. Rows past it cannot be confirmed negative, only unobserved.
-  This is what binds on `test`, and it binds earlier than that split's own embargo.
+  a training row's label window reaches into validation. It costs validation
+  fourteen of its thirty-one days: `val` is 408 prediction times, not 720.
+- **Label observability**, a global cutoff at `2015-12-17 06:00` = the last observed
+  failure (`2015-12-31 06:00`) minus the horizon. Rows past it cannot be confirmed
+  negative, only unobserved. This is what binds on `test`, and it binds earlier than
+  that split's own embargo — `2015-12-17 06:00` against `2015-12-17 23:00`.
 
 **Feature windows reaching backwards across a split boundary are permitted and
 correct.** A validation row at 2015-10-01 00:00 has a 7-day error count that reads
@@ -191,13 +199,15 @@ Measured, not estimated, at the **14-day** operational horizon
 | val | 40,800 | 1,038 (2.544%) | 6,084 (14.912%) | 1,272 (3.118%) | 2,640 (6.471%) | 10,926 (26.779%) |
 | test | 111,100 | 5,968 (5.372%) | 12,716 (11.446%) | 5,169 (4.653%) | 6,413 (5.772%) | 28,602 (25.744%) |
 
-The test split's 2,590 positive rows derive from roughly 127 distinct failure events.
-Recall estimated on that carries wide uncertainty and must be reported with an interval,
-not as a point estimate.
+The test split's 28,602 any-component positive rows derive from 121 distinct failure
+events — the rows are not independent, because one event positively labels up to 336
+consecutive prediction times for that machine. Recall estimated on 121 events carries
+wide uncertainty and must be reported with an interval, not as a point estimate.
 
-Note that `comp2` in validation runs at 0.867% against 0.687% in train — the rarest
-class in one split is not the rarest in another. A threshold tuned on validation is
-tuned on a month with a different mix.
+Note that `comp2` in validation runs at 14.912% against 9.557% in train, and that the
+rarest class in one split is not the rarest in another: `comp1` is rarest in validation
+at 2.544% while `comp3` is rarest in train at 5.144%. A threshold tuned on validation is
+tuned on 17 days with a different mix.
 
 ---
 

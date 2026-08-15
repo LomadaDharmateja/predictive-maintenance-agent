@@ -41,7 +41,7 @@ LEGACY_HORIZON_24H = pd.Timedelta(hours=24)
 LAST_OBSERVED_FAILURE = pd.Timestamp("2015-12-31 06:00:00")
 
 #: Latest prediction time whose whole label window is observed.
-MAX_PREDICTION_TIME = LAST_OBSERVED_FAILURE - LABEL_HORIZON  # 2015-12-30 06:00
+MAX_PREDICTION_TIME = LAST_OBSERVED_FAILURE - LABEL_HORIZON  # 2015-12-17 06:00
 
 # --------------------------------------------------------------------------
 # Features

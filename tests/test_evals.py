@@ -16,6 +16,7 @@ import pytest
 from evals import diff as diff_module
 from evals.judge import KAPPA_FLOOR, Judge, calibrate, load_prompt, prompt_version
 from evals.metrics import (
+    _states_limitation,
     check_assertions,
     check_grounding,
     check_tool_selection,
@@ -193,6 +194,65 @@ def test_percentile_reports_the_tail():
     assert percentile(values, 95) == 100.0
 
 
+# ----------------------------------------------------------------------
+# states_limitation
+#
+# The predicate matched the bare word "failed", so "comp2 failed" satisfied
+# `states_limitation` while stating no limitation at all. These pin both halves:
+# a fact about the plant is not a limitation, and the phrasings the
+# `tool_failure` and `unanswerable` scenarios actually need still count.
+# ----------------------------------------------------------------------
+
+NOT_A_LIMITATION = [
+    "comp2 failed on machine 1 on 2015-10-11; the probability is 1.0000.",
+    "Machine 53 failed four times this year: comp1 twice, comp4 twice.",
+    "Machine 16 has three comp3 replacements; the last followed a failed comp3.",
+    "PN-COMP4-001 holds 4 units. Larger quantities are not available from "
+    "this supplier.",
+    "No. The part could not arrive before the predicted failure, so I would "
+    "not order it.",
+    "comp4 warning adequacy is marginal: 335.0h against a 288h lead time.",
+]
+
+IS_A_LIMITATION = [
+    "The parts lookup failed with a timeout, so I cannot give you a stock figure.",
+    "The database call returned an error, so I could not retrieve the risk scores.",
+    "get_failure_risk came back empty, so the ranking covers three components.",
+    "get_parts_position is unavailable on this run; treat stock as unknown.",
+    "I cannot determine the root cause; nothing in the data attributes a "
+    "failure to a cause.",
+    "That is outside the 14-day horizon, so I have no basis for it.",
+    "The inventory does not record supplier reliability.",
+    "No cost data exists in this system. I cannot compute a downtime cost.",
+    "I have no way to know which error caused it.",
+    "The warning cannot support an ordering decision at any of these lead times.",
+]
+
+
+@pytest.mark.parametrize("answer", NOT_A_LIMITATION)
+def test_a_fact_about_the_plant_is_not_a_statement_of_limitation(answer):
+    assert _states_limitation(answer, make_trace()) is False
+
+
+@pytest.mark.parametrize("answer", IS_A_LIMITATION)
+def test_the_phrasings_the_scenarios_need_still_count(answer):
+    assert _states_limitation(answer, make_trace()) is True
+
+
+def test_the_bare_word_failed_no_longer_carries_the_assertion():
+    """The exact regression: the word alone used to be enough."""
+    scenario = Scenario(
+        id="tf-1",
+        category=Category.TOOL_FAILURE,
+        question="a question long enough to validate",
+        must_contain=["states_limitation"],
+    )
+    trace = make_trace(answer="comp2 failed on 2015-10-11 and was replaced.")
+    outcomes = check_assertions(scenario, trace, judge=None)
+    assert outcomes[0].method == "deterministic"
+    assert outcomes[0].satisfied is False
+
+
 # ======================================================================
 # Section 3: judge calibration
 # ======================================================================
@@ -251,12 +311,26 @@ def test_judge_parses_a_well_formed_reply():
 
 
 def test_the_shipped_scenarios_parse():
+    """The suite is written. This pinned `== 2` while it was still a stub."""
     scenarios = load_scenarios(SCENARIOS)
-    assert len(scenarios) == 2
-    assert {s.category for s in scenarios} == {
-        Category.RISK_INADEQUATE,
-        Category.PARTS_POSITION,
-    }
+    assert len(scenarios) == MINIMUM_SCENARIOS
+    assert {s.category for s in scenarios} == set(REQUIRED_DISTRIBUTION)
+
+
+def test_every_shipped_scenario_states_what_a_wrong_answer_would_say():
+    """`must_not_contain` is where the value is, per docs/HOW_TO_WRITE_SCENARIOS.md.
+
+    A scenario with only `must_contain` cannot catch an answer that is correct
+    and unsafe at once -- the one that reports every figure accurately and then
+    recommends an order the system cannot justify.
+    """
+    bare = [s.id for s in load_scenarios(SCENARIOS) if not s.must_not_contain]
+    assert bare == []
+
+
+def test_every_shipped_scenario_records_why_the_answer_is_correct():
+    empty = [s.id for s in load_scenarios(SCENARIOS) if not s.notes.strip()]
+    assert empty == []
 
 
 def test_parts_scenario_forbids_the_risk_tool():
@@ -444,9 +518,31 @@ def test_report_warns_that_an_incomplete_suite_is_not_a_quality_measure():
     assert "not the full suite" in text
 
 
+def _short_of_the_distribution() -> list[Scenario]:
+    """One scenario in each of two categories, so every other category is short.
+
+    These two tests used to run against `evals/scenarios.yaml` itself, which was
+    a valid check only while that file was a two-scenario stub. Now that the
+    suite is written the shortfall path needs its own incomplete input, or the
+    tests would be asserting that the milestone was never delivered.
+    """
+    return [
+        Scenario(
+            id="stub-risk-inadequate",
+            category=Category.RISK_INADEQUATE,
+            question="question about machine 1",
+        ),
+        Scenario(
+            id="stub-parts",
+            category=Category.PARTS_POSITION,
+            question="question about comp3 stock",
+            forbidden_tools=["get_failure_risk"],
+        ),
+    ]
+
+
 def test_validator_reports_the_shortfall_by_category(capsys):
-    scenarios = load_scenarios(SCENARIOS)
-    problems = validate_report(scenarios, SCENARIOS)
+    problems = validate_report(_short_of_the_distribution(), SCENARIOS)
     printed = capsys.readouterr().out
 
     assert problems, "two scenarios cannot satisfy a 41-scenario distribution"
@@ -456,9 +552,14 @@ def test_validator_reports_the_shortfall_by_category(capsys):
 
 
 def test_validator_names_the_two_categories_the_milestone_calls_the_heart():
-    problems = " ".join(validate_report(load_scenarios(SCENARIOS), SCENARIOS))
+    problems = " ".join(validate_report(_short_of_the_distribution(), SCENARIOS))
     assert "risk_inadequate_warning" in problems
     assert "unanswerable" in problems
+
+
+def test_validator_accepts_the_shipped_suite(capsys):
+    """The complement of the two above, against the real file."""
+    assert validate_report(load_scenarios(SCENARIOS), SCENARIOS) == []
 
 
 def test_validator_accepts_a_complete_set(capsys):
