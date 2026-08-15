@@ -1,110 +1,79 @@
 # CLAUDE.md
 
-## Purpose of this session
+Project instructions loaded into every session. Keep this current.
 
-This repository contains an agentic AI system for industrial predictive maintenance that I built some time ago. I have lost track of the implementation details.
+## What this project is
 
-Your task is a **read-only forensic audit** of this codebase, followed by two written documents. You are not here to improve, refactor, or fix anything.
+A predictive-maintenance agent over the Microsoft Azure PdM dataset:
+100 machines, 876,100 hourly telemetry rows, plus error, maintenance
+and failure logs. An LLM agent answers maintenance-planning questions
+through typed tools over a calibrated risk model, maintenance history
+and a synthetic parts inventory.
 
----
+This is a rebuild. An earlier version (VULCAN) was audited, found to
+be built on three unrelated datasets, and replaced. That version is in
+`archive/` and its audit is in `docs/v1/`. Do not treat anything in
+`archive/` or `docs/v1/` as current.
 
-## Ground rules — read these before doing anything
+## Problem statement
 
-1. **Read-only.** Do not modify, refactor, reformat, delete, or create any source file. The only files you may write are the two deliverables named at the bottom of this document.
-2. **Verify, do not infer.** Where it is safe to do so, actually execute things to confirm your findings: load the CSVs and report real shapes, unpickle the model and inspect it, parse the dependency files. Do not describe behaviour you have only read in code comments or in the existing README.
-3. **Mark uncertainty explicitly.** If you cannot confirm something, write `UNVERIFIED:` followed by what you believe and why you could not confirm it. Never fill a gap with a plausible guess.
-4. **Do not run anything that costs money or hits an external API.** No calls to Gemini, Pinecone, HuggingFace Inference, or Tavily. Static analysis and local data inspection only.
-5. **Do not print or copy any secret.** If you find API keys committed in the code, report the file and line number and the fact of exposure — never the value.
-6. **No marketing language.** Plain technical prose throughout. No emoji, no adjectives like "powerful", "seamless", "production-grade", "enterprise", "cutting-edge". No business-impact claims.
-7. **Treat the existing README as a claim to be tested, not as a source of truth.** It was written loosely and parts of it are known to be inaccurate.
+Flag elevated component risk over a 14-day window so maintenance
+attention can be scheduled, and manage parts from stock levels and
+consumption rates rather than from predictions.
 
----
+The second clause is a measured constraint, not a preference. No
+prediction horizon satisfies both model accuracy and the 23-day median
+parts lead time; one of nine parts can be ordered in time. See
+`docs/EVALUATION.md`.
 
-## Deliverable 1 — `docs/PROJECT_AUDIT.md`
+## Read these before working
 
-This is the raw, honest inventory. It is for my eyes and my advisor's, not for the public. Prioritise completeness and accuracy over readability.
+- `docs/DATA.md` — schema, leakage rules, cost assumption
+- `docs/FEATURES.md` — every feature and its window
+- `docs/EVALUATION.md` — model results and what they do not support
+- `docs/MILESTONE_*.md` — the spec for the milestone in progress
 
-Cover the following sections:
+## Standing rules
 
-### 1. Repository inventory
-Full file tree excluding `.git`, virtualenvs, caches, and data blobs. For each source module: line count and a one-line statement of responsibility. List every declared dependency and mark which are actually imported anywhere versus which are unused.
+**Temporal integrity.** No feature may use a record with
+`datetime > t`. Splits are temporal with an embargo derived from the
+label horizon. No random or shuffled splitting anywhere.
 
-### 2. Data assets
-For every CSV, PDF, database file, and serialised artifact in the repo:
-- Exact filename, size, and location
-- For tabular data: row count, column names with dtypes, null counts per column, and the value distribution of any target or label column
-- **Explicitly report class balance** for any classification target
-- Whether the data appears to be a known public dataset — name your best guess and mark it `UNVERIFIED` unless a source is documented in the repo
-- Whether any data-generation, cleaning, or ingestion script exists, or whether the files simply appear as committed artifacts
+**The test split is opened once**, at the end of a milestone, after
+every modelling decision is final. One module may load it. Choosing
+between trained models by their test scores is a modelling decision
+taken on test.
 
-### 3. Machine learning component
-- Locate the serialised model. Load it and report: exact class, library and version it was pickled with, all hyperparameters, expected feature names and their order, number of features
-- Locate the training script or notebook. If none exists, state that plainly and note that the model is therefore **not reproducible from this repository**
-- Report any evaluation code or metrics found. If none exist, say so
-- Report how the model is invoked at inference time and whether feature ordering at inference is guaranteed to match training
+**Metrics.** PR-AUC with bootstrap confidence intervals, against the
+majority and rule-based baselines. Accuracy is never reported; the
+positive rate is under 1%.
 
-### 4. Agent layer
-- Exact model identifier and provider
-- Agent framework and version, and which agent construction pattern is used
-- The system prompt, reproduced verbatim in a code block
-- Complete list of registered tools with their function signatures and docstrings exactly as written
-- Memory mechanism, and whether it is bounded
-- Iteration limits, temperature, and any other generation parameters
-- Whether tool outputs are validated before being returned to the model
+**Calibration.** A probability is presented as trustworthy only when
+its held-out Brier skill is positive and its confidence interval
+excludes zero. Otherwise it carries `calibrated: false` and the agent
+must surface that.
 
-### 5. Tool implementations
-For each tool, one subsection covering: what it does, what data source it touches, any SQL reproduced verbatim, what it returns and in what format, what input validation exists, and what happens on failure.
+**Database access.** The model never writes SQL. Typed filters only,
+read-only connections, authorizer allowlist. Verified by content hash.
 
-### 6. Retrieval layer
-Embedding model and dimensionality, vector store and index configuration, chunking strategy with exact parameters, how many chunks exist, which source documents were indexed, and whether a reproducible ingestion script exists or the index was populated manually.
+**Errors.** Tool results are `Success[T] | ToolError` as distinct
+types. A failed call must never be presentable as a successful one.
+No bare `except Exception` that returns a value.
 
-### 7. External services and configuration
-Every external API called. Every environment variable required. What the application does when each is missing or invalid — crash, silent failure, or graceful degradation.
+**Determinism.** Seed everything. Two clean builds produce identical
+content hashes. No clock, no network, no environment in the pipeline.
 
-### 8. Interface layer
-Pages or tabs, state management approach, which user actions trigger agent invocations, and whether concurrent or repeated invocations are handled.
+## Working style
 
-### 9. End-to-end execution trace
-Pick one realistic user query. Trace it through the entire system step by step — every function entered, every external call, every state mutation — until the response is rendered. Then do the same for one query that would fail, and describe exactly how it fails.
+- Report what you measured, not what you expect. Mark anything
+  unverified as `UNVERIFIED:`.
+- If a spec I wrote is wrong, say so and say why rather than
+  implementing it.
+- Negative results are results. Report them plainly.
+- Stop at the stated milestone boundary. Do not proceed to the next.
+- Do not print or copy any credential value.
 
-### 10. Gaps and risks
-An unvarnished list. Include at minimum: absence of tests, absence of error handling, absence of retries or timeouts, hardcoded values, committed secrets, SQL injection surface, unbounded memory growth, missing input validation, dead code, silent exception swallowing, and any place where the system would break under realistic conditions.
+## Environment
 
-### 11. Claims in the existing README that you could not verify
-Go through the current README line by line. List every factual or performance claim, and mark each as `CONFIRMED`, `CONTRADICTED`, or `UNVERIFIABLE`, with the evidence.
-
----
-
-## Deliverable 2 — `docs/README.draft.md`
-
-Do **not** overwrite the existing `README.md`. Write a new draft at the path above.
-
-This should read like an engineering design document, not a product page. Structure:
-
-1. **What this is** — two or three sentences, plain description
-2. **Problem statement and scope** — including an explicit *non-goals* subsection
-3. **Data** — dataset name, source, and licence if determinable; what it contains; **its limitations, stated openly** (synthetic origin, size, class imbalance, single-document knowledge base — whatever is true)
-4. **Architecture** — component diagram in Mermaid, followed by prose explaining the flow
-5. **Tool reference** — table of every agent tool: name, purpose, data source, inputs, outputs
-6. **Machine learning model** — what it predicts, features used, how it was trained, and a metrics section left as `TODO: not yet measured` where no evaluation exists
-7. **Setup and running** — prerequisites, installation, required environment variables, how to launch
-8. **Configuration reference** — every env var and config value with its purpose and default
-9. **Known limitations and failure modes** — carry the honest findings from the audit through to here
-10. **Roadmap** — what is missing and would need to exist for this to be considered production-ready
-
-### Hard constraints on the draft README
-- Every number must be one you actually measured or found documented in the repo. If it has not been measured, write `TODO: not yet measured` rather than estimating.
-- No claims about business outcomes, cost savings, downtime reduction, or operational impact. This project has never touched a real factory.
-- No claim that the system is production-ready, enterprise-grade, or edge-deployable.
-- If a component depends on an external network service, say so plainly in the architecture section rather than describing it as lightweight or local.
-
----
-
-## When you are done
-
-Finish with a short summary in the chat covering:
-- The three findings that most surprised you
-- The three things a hiring engineer reviewing this repo would criticise first
-- Anything in the codebase that is genuinely well done and worth keeping
-
-Then stop. Do not begin implementing fixes.
+Windows, PowerShell, venv at `venv/`. `make` is not installed —
+run recipe steps directly.
