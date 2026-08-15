@@ -31,29 +31,48 @@ from evals.schema import (
     ScenarioTrace,
     ToolCallTrace,
 )
+from evals.transcript import (
+    TRANSCRIPTS,
+    TranscriptInvalid,
+    TranscriptMissing,
+    ValidationWindowError,
+    identity_of,
+    load_validated,
+    validate_scenario_window,
+    window_guarded,
+)
 from src.agent.contracts import ErrorCode, ToolError
 from src.agent.loop import Agent, LLMResponse, LoopConfig, ToolCall
+from src.agent.providers import ModelIdentity
 
-HARNESS_VERSION = "1.0.0"
+HARNESS_VERSION = "1.1.0"
 
 EVALS = Path("evals")
 SCENARIOS = EVALS / "scenarios.yaml"
-TRANSCRIPTS = EVALS / "transcripts"
 RESULTS_DIR = EVALS / "results"
 
 DEFAULT_SEEDS = (1, 2, 3)
 
-#: Rough per-token prices in USD, used only for the cost column. Stated as an
-#: assumption: they are provider list prices, not a bill anyone has paid.
-COST_PER_1K_INPUT = 0.003
-COST_PER_1K_OUTPUT = 0.015
+#: Per-1K-token prices in USD, used only for the cost column, keyed by the
+#: provider that produced the transcript. Stated as an assumption: these are
+#: published list prices, not a bill anyone has paid.
+#:
+#: Ollama is zero because it is zero. Pricing a local run at hosted rates --
+#: which this harness did until transcripts carried a provider -- reports a
+#: cost that was never incurred, and the cost column exists to inform a
+#: decision about what a real run would cost.
+PRICES_PER_1K = {
+    "ollama": (0.0, 0.0),
+    "anthropic": (0.005, 0.025),  # claude-opus-5 list price
+}
+DEFAULT_PRICE = (0.003, 0.015)
 
 
-class TranscriptMissing(RuntimeError):
-    """No recording exists for this scenario and seed."""
+def price_for(provider: str) -> tuple[float, float]:
+    return PRICES_PER_1K.get(provider, DEFAULT_PRICE)
 
 
-class RecordedClient:
+class ReplayClient:
     """Replays a recorded exchange. Makes no network call.
 
     A transcript is a list of turns, each either a set of tool calls or a final
@@ -112,17 +131,12 @@ def load_scenarios(path: Path = SCENARIOS) -> list[Scenario]:
             "docs/MILESTONE_5.md section 2."
         )
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or []
-    return [Scenario(**entry) for entry in raw]
-
-
-def load_transcript(scenario_id: str, seed: int, directory: Path = TRANSCRIPTS) -> list[dict]:
-    path = directory / f"{scenario_id}.seed{seed}.json"
-    if not path.exists():
-        raise TranscriptMissing(
-            f"{path} not found. Record it with `make eval-record` (--live), or "
-            "check the scenario id."
-        )
-    return json.loads(path.read_text(encoding="utf-8"))["turns"]
+    scenarios = [Scenario(**entry) for entry in raw]
+    # A scenario whose own prediction time sits in the test split would send
+    # every transcript recorded from it into the test split too.
+    for scenario in scenarios:
+        validate_scenario_window(scenario)
+    return scenarios
 
 
 def _inject(scenario: Scenario, database: Path):
@@ -155,14 +169,18 @@ def run_scenario(
     seed: int,
     database: Path,
     transcripts: Path = TRANSCRIPTS,
-) -> ScenarioTrace:
+) -> tuple[ScenarioTrace, ModelIdentity]:
     from src.agent import tools as tools_module
 
-    client = RecordedClient(load_transcript(scenario.id, seed, transcripts))
+    # Validated before it is replayed: a transcript whose tool calls do not
+    # match its scenario answers a different question, and scoring it would
+    # score that other question. See `evals/transcript.py`.
+    transcript = load_validated(scenario, seed, transcripts)
+    client = ReplayClient(transcript["turns"])
     agent = Agent(client, database=database, config=LoopConfig())
 
     original = tools_module.dispatch
-    tools_module.dispatch = _inject(scenario, database)
+    tools_module.dispatch = window_guarded(_inject(scenario, database))
     started = time.perf_counter()
     try:
         outcome = agent.run(scenario.question)
@@ -184,11 +202,10 @@ def run_scenario(
         if entry.kind in {"tool_result", "tool_error"}
     ]
 
-    cost = (
-        client.tokens_in / 1000 * COST_PER_1K_INPUT
-        + client.tokens_out / 1000 * COST_PER_1K_OUTPUT
-    )
-    return ScenarioTrace(
+    identity = identity_of(transcript)
+    price_in, price_out = price_for(identity.provider)
+    cost = client.tokens_in / 1000 * price_in + client.tokens_out / 1000 * price_out
+    trace = ScenarioTrace(
         scenario_id=scenario.id,
         seed=seed,
         answer=outcome.answer,
@@ -201,6 +218,7 @@ def run_scenario(
         wall_clock_ms=round(elapsed, 2),
         estimated_cost_usd=round(cost, 6),
     )
+    return trace, identity
 
 
 def run_suite(
@@ -212,15 +230,26 @@ def run_suite(
     mode: str = "recorded",
 ) -> tuple[RunResults, list[ScenarioTrace]]:
     results, forbidden, hallucinations, traces = [], [], [], []
+    identities: dict[str, ModelIdentity] = {}
 
     for scenario in scenarios:
         for seed in seeds:
-            trace = run_scenario(scenario, seed, database, transcripts)
+            trace, identity = run_scenario(scenario, seed, database, transcripts)
+            identities[identity.label()] = identity
             traces.append(trace)
             result, violations, fabricated = score_scenario(scenario, trace, judge)
             results.append(result)
             forbidden.extend(violations)
             hallucinations.extend(fabricated)
+
+    if len(identities) > 1:
+        # Blending two models inside one results file makes every per-category
+        # figure a weighted average of two different systems, and nothing in
+        # the report would say so.
+        raise TranscriptInvalid(
+            "transcripts in this run come from more than one model: "
+            f"{sorted(identities)}. A run is one model; re-record the odd ones out."
+        )
 
     sha = git_sha()
     stamp = datetime.now(timezone.utc)
@@ -232,6 +261,7 @@ def run_suite(
         seeds=list(seeds),
         n_scenarios=len(scenarios),
         harness_version=HARNESS_VERSION,
+        model=next(iter(identities.values())) if identities else None,
     )
     return (
         RunResults(
@@ -270,27 +300,74 @@ def main() -> None:
     parser.add_argument(
         "--live",
         action="store_true",
-        help="re-record against a live provider instead of replaying",
+        help="re-record against a live provider first, then score the recording",
     )
+    parser.add_argument("--provider", choices=("ollama", "anthropic"), default="ollama")
+    parser.add_argument("--model", default=None)
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="with --live, re-record even scenarios that already have a transcript",
+    )
+    parser.add_argument("--throttle", type=float, default=0.0)
     args = parser.parse_args()
 
-    if args.live:
-        raise SystemExit(
-            "--live is the re-recording path and needs a configured provider. "
-            "It is deliberately not wired to one here: Milestone 5's acceptance "
-            "requires the suite to run offline, and a live default would make "
-            "every run cost money and drift. Configure src.agent.loop.ModelConfig "
-            "and implement a recording client before using it."
-        )
-
     scenarios = load_scenarios(args.scenarios)
+
+    if args.live:
+        # --live re-records, then scores the recording. Scoring never reads a
+        # live model: the numbers in a report always come from a transcript on
+        # disk, whether it was written a minute ago or a month ago.
+        from dataclasses import replace as _replace
+
+        from evals.record import record_suite
+        from src.agent.loop import ModelConfig
+
+        config = ModelConfig(provider=args.provider)
+        if args.model:
+            config = _replace(
+                config,
+                **(
+                    {"model": args.model}
+                    if args.provider == "anthropic"
+                    else {"local_model": args.model}
+                ),
+            )
+        print(f"--live: recording against {args.provider} before scoring")
+        summary = record_suite(
+            scenarios,
+            DEFAULT_SEEDS,
+            config,
+            args.database,
+            args.transcripts,
+            resume=not args.force,
+            throttle=args.throttle,
+        )
+        print(
+            f"  {len(summary['recorded'])} recorded, {len(summary['skipped'])} skipped, "
+            f"{len(summary['failed'])} failed"
+        )
+        if summary["failed"]:
+            raise SystemExit(
+                f"{len(summary['failed'])} scenario(s) failed to record; the suite "
+                "is not scored on a partial recording. Fix or re-run them first:\n  "
+                + "\n  ".join(f"{e['key']}: {e['error']}" for e in summary["failed"])
+            )
+
     print(f"{len(scenarios)} scenario(s), seeds {DEFAULT_SEEDS}")
-    run, traces = run_suite(scenarios, args.database, transcripts=args.transcripts)
+    run, traces = run_suite(
+        scenarios,
+        args.database,
+        transcripts=args.transcripts,
+        mode="live" if args.live else "recorded",
+    )
 
     results_path = write_results(run, args.results)
     traces_path = write_traces(traces, run.metadata.run_id, args.results)
 
     passed = sum(r.passed for r in run.results)
+    if run.metadata.model:
+        print(f"  model: {run.metadata.model.label()}")
     print(f"  {passed}/{len(run.results)} scenario-seed runs passed")
     print(f"  {len(run.forbidden_calls)} forbidden tool call(s)")
     print(f"  {len(run.hallucinations)} hallucinated figure(s)")

@@ -102,8 +102,20 @@ prove it doesn't.
 - Vary machines and timestamps; do not reuse machine 42 throughout.
 - Include at least two scenarios where the honest answer disappoints the user.
 - Include at least one where two components disagree — one adequate, one not.
-- For `prompt_injection`, place the injected instruction in a maintenance note or
-  error field, not in the user's question.
+- For `prompt_injection`, deliver the payload as work-order or log text quoted
+  inside the operator's question, and label the category **user-channel** in the
+  file.
+
+  **Corrected after the fact.** This originally said to place the injection "in
+  a maintenance note or error field, not in the user's question" — the data
+  channel, which is the serious one. It cannot be done on this tool surface: no
+  output model has a free-text field a note could occupy, so writing those four
+  scenarios as specified would have meant adding the vulnerability first.
+  `docs/SECURITY.md` has the derivation and says exactly how narrow the finding
+  is. The distinction is recorded in `evals/scenarios.yaml` rather than papered
+  over, because a suite that claims injection coverage it does not have is
+  worse than one claiming none: the first invites the reader to conclude the
+  vector was tested.
 
 ---
 

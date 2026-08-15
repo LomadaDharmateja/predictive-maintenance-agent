@@ -1,0 +1,10 @@
+Recorded transcripts land here, one file per scenario and seed.
+
+Empty on purpose. The six files that used to sit here were hand-written
+fixtures, not recordings: all three seeds of each were byte-identical, and one
+called get_failure_risk(machine_id=42, as_of="2015-11-15T06:00:00") -- a
+test-split prediction time -- against a scenario that had been rewritten to
+machine 30 at 2015-10-14. It scored passed=True for answering a different
+question. evals/transcript.py now refuses both mistakes.
+
+Record with:  python -m evals.record --provider ollama

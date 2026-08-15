@@ -8,12 +8,25 @@ whole point of the recorded mode.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
 from evals import diff as diff_module
+from evals.record import RecordingClient, record_suite
+from evals.transcript import (
+    TranscriptInvalid,
+    TranscriptMissing,
+    ValidationWindowError,
+    assert_validation_window,
+    expected_machine_ids,
+    read_transcript,
+    transcript_path,
+    validate_transcript,
+    window_guarded,
+)
 from evals.judge import KAPPA_FLOOR, Judge, calibrate, load_prompt, prompt_version
 from evals.metrics import (
     _states_limitation,
@@ -26,8 +39,7 @@ from evals.metrics import (
 )
 from evals.report import render as render_report
 from evals.runner import (
-    RecordedClient,
-    TranscriptMissing,
+    ReplayClient,
     load_scenarios,
     run_suite,
 )
@@ -46,6 +58,100 @@ from evals.validate_scenarios import report as validate_report
 REPO = Path(__file__).resolve().parents[1]
 SCENARIOS = REPO / "evals" / "scenarios.yaml"
 TRANSCRIPTS = REPO / "evals" / "transcripts"
+
+
+def TRANSCRIPTS_FOR_TEST(directory: Path, scenario_id: str, seed: int) -> Path:
+    return transcript_path(scenario_id, seed, directory)
+
+
+# ----------------------------------------------------------------------
+# A stub provider, so the recording path is exercised without a model
+#
+# It satisfies the same surface `AnthropicClient` and `OllamaClient` do:
+# `identity`, `last_exchange`, `complete`. Arguments are built from the
+# scenario itself, which is exactly what the transcript-consistency invariant
+# checks -- so these transcripts are valid by construction, and the tests that
+# corrupt one prove the check bites.
+# ----------------------------------------------------------------------
+
+COMPONENT = re.compile(r"(comp[1-4])")
+
+
+class StubAdapter:
+    """Calls the scenario's required tools, then answers. No network."""
+
+    def __init__(self, scenario: Scenario, seed: int) -> None:
+        from src.agent.providers import ModelIdentity
+
+        self.scenario = scenario
+        self.turn = 0
+        self.last_exchange: dict = {}
+        self.identity = ModelIdentity(
+            provider="stub",
+            model="scripted",
+            version="1",
+            temperature=0.0,
+            seed=seed,
+            max_tokens=1024,
+        )
+
+    def _arguments(self, tool: str) -> dict:
+        from src.agent.tools import REGISTRY
+
+        model, _ = REGISTRY[tool]
+        machines = expected_machine_ids(self.scenario) or {1}
+        found = COMPONENT.search(self.scenario.id)
+        candidates = {
+            "machine_id": sorted(machines)[0],
+            "as_of": self.scenario.as_of.isoformat() if self.scenario.as_of else None,
+            "component": found.group(1) if found else "comp1",
+        }
+        return {
+            key: value
+            for key, value in candidates.items()
+            if key in model.model_fields and value is not None
+        }
+
+    def complete(self, messages, tools):
+        from src.agent.loop import LLMResponse, ToolCall
+
+        self.turn += 1
+        self.last_exchange = {"tokens_in": 100, "tokens_out": 20, "request": {}, "response": {}}
+        if self.turn == 1 and self.scenario.required_tools:
+            return LLMResponse(
+                tool_calls=tuple(
+                    ToolCall(tool, self._arguments(tool))
+                    for tool in self.scenario.required_tools
+                )
+            )
+        return LLMResponse(
+            text=(
+                "The warning adequacy is insufficient and I could not establish "
+                "enough to support an order; stock and consumption are the basis."
+            )
+        )
+
+
+def stub_factory(config, scenario, seed):
+    return StubAdapter(scenario, seed)
+
+
+@pytest.fixture(scope="module")
+def recorded_suite(tmp_path_factory):
+    """Two scenarios recorded through the real recording path, into a tmp dir."""
+    directory = tmp_path_factory.mktemp("transcripts")
+    scenarios = load_scenarios(SCENARIOS)[:2]
+    summary = record_suite(
+        scenarios,
+        (1, 2, 3),
+        None,
+        REPO / "data" / "pdm.db",
+        directory,
+        resume=False,
+        client_factory=stub_factory,
+    )
+    assert not summary["failed"], summary["failed"]
+    return scenarios, directory
 
 
 def make_trace(**overrides) -> ScenarioTrace:
@@ -340,8 +446,8 @@ def test_parts_scenario_forbids_the_risk_tool():
     assert "get_failure_risk" in parts.forbidden_tools
 
 
-def test_recorded_client_makes_no_network_call_and_replays_in_order():
-    client = RecordedClient(
+def test_replay_client_makes_no_network_call_and_replays_in_order():
+    client = ReplayClient(
         [
             {"tool_calls": [{"name": "get_machine_profile", "arguments": {"machine_id": 1}}]},
             {"text": "done", "tokens_in": 10, "tokens_out": 5},
@@ -355,29 +461,35 @@ def test_recorded_client_makes_no_network_call_and_replays_in_order():
 
 def test_running_past_the_end_of_a_transcript_raises():
     """An improvised turn would silently turn a regression into a pass."""
-    client = RecordedClient([{"text": "done"}])
+    client = ReplayClient([{"text": "done"}])
     client.complete([], [])
     with pytest.raises(TranscriptMissing, match="Re-record"):
         client.complete([], [])
 
 
 def test_a_missing_transcript_names_the_file():
-    from evals.runner import load_transcript
-
     with pytest.raises(TranscriptMissing, match="not found"):
-        load_transcript("no-such-scenario", 1, TRANSCRIPTS)
+        read_transcript("no-such-scenario", 1, TRANSCRIPTS)
 
 
+@pytest.mark.skipif(
+    not any(TRANSCRIPTS.glob("*.json")),
+    reason="no transcripts recorded yet; see evals/record.py",
+)
 @pytest.mark.parametrize("seed", [1, 2, 3])
-def test_every_shipped_scenario_has_a_transcript_for_every_seed(seed):
+def test_every_recorded_transcript_belongs_to_its_scenario(seed):
+    """Every transcript on disk must pass both invariants for its scenario."""
     for scenario in load_scenarios(SCENARIOS):
-        assert (TRANSCRIPTS / f"{scenario.id}.seed{seed}.json").exists()
+        path = TRANSCRIPTS / f"{scenario.id}.seed{seed}.json"
+        if not path.exists():
+            continue
+        validate_transcript(scenario, json.loads(path.read_text(encoding="utf-8")))
 
 
-def test_suite_runs_offline_and_deterministically(built_db):
-    scenarios = load_scenarios(SCENARIOS)
-    first, _ = run_suite(scenarios, Path(built_db), transcripts=TRANSCRIPTS)
-    second, _ = run_suite(scenarios, Path(built_db), transcripts=TRANSCRIPTS)
+def test_suite_runs_offline_and_deterministically(built_db, recorded_suite):
+    scenarios, transcripts = recorded_suite
+    first, _ = run_suite(scenarios, Path(built_db), transcripts=transcripts)
+    second, _ = run_suite(scenarios, Path(built_db), transcripts=transcripts)
 
     assert [r.passed for r in first.results] == [r.passed for r in second.results]
     assert [r.scenario_id for r in first.results] == [
@@ -386,10 +498,226 @@ def test_suite_runs_offline_and_deterministically(built_db):
     assert len(first.results) == len(scenarios) * 3
 
 
-def test_traces_capture_the_tool_results_grounding_needs(built_db):
-    _, traces = run_suite(
-        load_scenarios(SCENARIOS), Path(built_db), transcripts=TRANSCRIPTS
+# ----------------------------------------------------------------------
+# Transcript / scenario consistency, and the validation-window guard
+#
+# The defect these pin: a transcript calling get_failure_risk(machine_id=42,
+# as_of="2015-11-15T06:00:00") replayed against a scenario rewritten to machine
+# 30 at 2015-10-14. It succeeded, read the test split, and scored passed=True
+# for answering a different question.
+# ----------------------------------------------------------------------
+
+
+def a_scenario(**overrides) -> Scenario:
+    base = dict(
+        id="scn-window",
+        category=Category.RISK_INADEQUATE,
+        question="Machine 30 - should I order a comp1 replacement?",
+        as_of=datetime(2015, 10, 14, 13, 0, 0),
+        required_tools=["get_failure_risk"],
     )
+    base.update(overrides)
+    return Scenario(**base)
+
+
+def a_transcript(tool_arguments: dict, **overrides) -> dict:
+    base = {
+        "scenario_id": "scn-window",
+        "seed": 1,
+        "model": {
+            "provider": "stub",
+            "model": "scripted",
+            "version": "1",
+            "temperature": 0.0,
+            "seed": 1,
+            "max_tokens": 1024,
+        },
+        "turns": [
+            {"tokens_in": 1, "tokens_out": 1,
+             "tool_calls": [{"name": "get_failure_risk", "arguments": tool_arguments}]},
+            {"tokens_in": 1, "tokens_out": 1, "text": "an answer"},
+        ],
+    }
+    base.update(overrides)
+    return base
+
+
+def test_a_transcript_matching_its_scenario_validates():
+    """Anti-vacuity: a check that always fails would pass the tests below."""
+    validate_transcript(
+        a_scenario(),
+        a_transcript({"machine_id": 30, "as_of": "2015-10-14T13:00:00"}),
+    )
+
+
+def test_a_transcript_with_the_wrong_as_of_is_invalid():
+    with pytest.raises(TranscriptInvalid, match="does not match the scenario"):
+        validate_transcript(
+            a_scenario(),
+            a_transcript({"machine_id": 30, "as_of": "2015-10-15T13:00:00"}),
+        )
+
+
+def test_a_transcript_with_the_wrong_machine_is_invalid():
+    with pytest.raises(TranscriptInvalid, match="not named in the"):
+        validate_transcript(
+            a_scenario(),
+            a_transcript({"machine_id": 42, "as_of": "2015-10-14T13:00:00"}),
+        )
+
+
+def test_a_transcript_reading_the_test_split_is_refused():
+    """The exact regression: machine 42 at 2015-11-15, a test-split timestamp."""
+    with pytest.raises(ValidationWindowError, match="outside the validation window"):
+        validate_transcript(
+            a_scenario(as_of=datetime(2015, 11, 15, 6, 0, 0)),
+            a_transcript({"machine_id": 30, "as_of": "2015-11-15T06:00:00"}),
+        )
+
+
+def test_a_transcript_with_no_model_block_is_invalid():
+    transcript = a_transcript({"machine_id": 30, "as_of": "2015-10-14T13:00:00"})
+    del transcript["model"]
+    with pytest.raises(TranscriptInvalid, match="cannot be attributed to a model"):
+        validate_transcript(a_scenario(), transcript)
+
+
+def test_a_fleet_question_names_no_machine_and_constrains_none():
+    """The agent's own selection is the thing under test on fleet questions."""
+    fleet = a_scenario(question="Which machines should I be looking at this week?")
+    assert expected_machine_ids(fleet) is None
+    validate_transcript(
+        fleet, a_transcript({"machine_id": 77, "as_of": "2015-10-14T13:00:00"})
+    )
+
+
+@pytest.mark.parametrize(
+    "moment",
+    ["2015-09-30T23:00:00", "2015-10-18T00:00:00", "2015-11-15T06:00:00",
+     "2015-12-17T06:00:00"],
+)
+def test_the_window_guard_refuses_everything_outside_validation(moment):
+    with pytest.raises(ValidationWindowError):
+        assert_validation_window(moment, "test")
+
+
+@pytest.mark.parametrize("moment", ["2015-10-01T00:00:00", "2015-10-17T23:00:00"])
+def test_the_window_guard_admits_both_edges(moment):
+    """Anti-vacuity: the guard must not be so blunt that valid work fails."""
+    assert assert_validation_window(moment, "test")
+
+
+def test_the_window_guard_stops_a_live_call_before_it_reads_the_test_split():
+    """During recording the model chooses the arguments; this is the only layer
+    that runs before the read."""
+    calls = []
+    guarded = window_guarded(lambda name, args, db=None: calls.append(name))
+
+    guarded("get_failure_risk", {"machine_id": 1, "as_of": "2015-10-05T00:00:00"})
+    assert calls == ["get_failure_risk"]
+
+    with pytest.raises(ValidationWindowError):
+        guarded("get_failure_risk", {"machine_id": 1, "as_of": "2015-12-01T00:00:00"})
+    assert calls == ["get_failure_risk"], "the refused call must not have executed"
+
+
+def test_every_shipped_scenario_sits_inside_the_validation_window():
+    for scenario in load_scenarios(SCENARIOS):
+        if scenario.as_of is not None:
+            assert_validation_window(scenario.as_of, scenario.id)
+
+
+# ----------------------------------------------------------------------
+# Recording: resumable, and one failure does not cost the sweep
+# ----------------------------------------------------------------------
+
+
+def test_recording_resumes_rather_than_re_recording_what_succeeded(
+    built_db, tmp_path
+):
+    scenarios = load_scenarios(SCENARIOS)[:1]
+    first = record_suite(
+        scenarios, (1,), None, Path(built_db), tmp_path, resume=False,
+        client_factory=stub_factory,
+    )
+    assert first["recorded"] and not first["skipped"]
+
+    second = record_suite(
+        scenarios, (1,), None, Path(built_db), tmp_path, resume=True,
+        client_factory=stub_factory,
+    )
+    assert second["skipped"] and not second["recorded"]
+
+    forced = record_suite(
+        scenarios, (1,), None, Path(built_db), tmp_path, resume=False,
+        client_factory=stub_factory,
+    )
+    assert forced["recorded"] and not forced["skipped"]
+
+
+def test_one_failing_scenario_does_not_cost_the_rest_of_the_sweep(built_db, tmp_path):
+    scenarios = load_scenarios(SCENARIOS)[:2]
+
+    def flaky(config, scenario, seed):
+        if scenario.id == scenarios[0].id:
+            raise RuntimeError("provider exploded")
+        return StubAdapter(scenario, seed)
+
+    summary = record_suite(
+        scenarios, (1,), None, Path(built_db), tmp_path, resume=False,
+        client_factory=flaky,
+    )
+    assert len(summary["failed"]) == 1
+    assert len(summary["recorded"]) == 1
+    assert "provider exploded" in summary["failed"][0]["error"]
+
+
+def test_a_recorded_transcript_carries_its_model_and_every_exchange(built_db, tmp_path):
+    scenario = load_scenarios(SCENARIOS)[0]
+    from evals.record import record_scenario
+
+    transcript = record_scenario(
+        scenario, 1, None, Path(built_db), tmp_path, client_factory=stub_factory
+    )
+    assert transcript["model"]["provider"] == "stub"
+    assert transcript["turns"], "a replayable turn list"
+    assert len(transcript["exchanges"]) == len(transcript["turns"])
+    assert all("messages_sent" in e for e in transcript["exchanges"]), (
+        "every request must be written down, not just every response"
+    )
+
+
+def test_a_run_records_which_model_produced_it(built_db, recorded_suite):
+    """A transcript that cannot be attributed to a model is not usable."""
+    scenarios, transcripts = recorded_suite
+    run, _ = run_suite(scenarios, Path(built_db), transcripts=transcripts)
+    assert run.metadata.model is not None
+    assert run.metadata.model.provider == "stub"
+    assert "stub" in run.metadata.model.label()
+
+
+def test_a_run_refuses_transcripts_from_two_different_models(
+    built_db, recorded_suite, tmp_path
+):
+    """Blending models would make every figure a weighted average of two systems."""
+    import shutil
+
+    scenarios, transcripts = recorded_suite
+    scratch = tmp_path / "mixed"
+    shutil.copytree(transcripts, scratch)
+
+    path = TRANSCRIPTS_FOR_TEST(scratch, scenarios[0].id, 1)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["model"]["model"] = "a-different-model"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(TranscriptInvalid, match="more than one model"):
+        run_suite(scenarios, Path(built_db), transcripts=scratch)
+
+
+def test_traces_capture_the_tool_results_grounding_needs(built_db, recorded_suite):
+    scenarios, transcripts = recorded_suite
+    _, traces = run_suite(scenarios, Path(built_db), transcripts=transcripts)
     assert traces
     for trace in traces:
         assert trace.tool_calls

@@ -32,7 +32,9 @@ FEATURE_SOURCES := src/features/config.py src/features/store.py \
 
 .PHONY: all data features train evaluate evaluate-test case-study inventory test \
         verify investigate clean distclean help fetch-data fetch-data-verify \
-        worksheet
+        worksheet eval eval-record eval-record-one eval-report eval-diff \
+        eval-validate render horizon-sweep horizon-decision signal-analysis \
+        calibration-check
 
 all: features
 
@@ -103,6 +105,20 @@ eval-validate:
 ## eval: run the agent suite offline against recorded transcripts
 eval:
 	$(PYTHON) -m evals.runner
+
+## eval-record: record transcripts against a live provider (resumable)
+## Local and free:   make eval-record
+## Hosted, reported: make eval-record PROVIDER=anthropic THROTTLE=1
+## Re-run after a failure and it continues rather than re-recording what worked.
+PROVIDER ?= ollama
+THROTTLE ?= 0
+eval-record:
+	$(PYTHON) -m evals.record --provider $(PROVIDER) --throttle $(THROTTLE)
+
+## eval-record-one: record a single scenario at one seed, to check the plumbing
+## make eval-record-one SCENARIO=lookup-machine-age-01
+eval-record-one:
+	$(PYTHON) -m evals.record --provider $(PROVIDER) --only $(SCENARIO) --seeds 1 --force
 
 ## eval-report: render docs/AGENT_EVALUATION.md from the latest run
 eval-report:

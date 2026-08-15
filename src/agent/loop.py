@@ -79,17 +79,22 @@ class ModelConfig:
     evaluated."""
 
     provider: str = "anthropic"
-    model: str = "claude-sonnet-4-5"
+    model: str = "claude-opus-5"
+    #: Requested, not guaranteed. Anthropic removed sampling parameters on its
+    #: newest models, so `src/agent/providers.py` omits this rather than
+    #: sending a value the API rejects -- and records that it did.
     temperature: float = 0.0
     seed: int | None = 20240608
-    timeout_seconds: float = 30.0
-    max_tokens: int = 2048
+    timeout_seconds: float = 120.0
+    #: Room for thinking plus the answer. `max_tokens` caps both together, and
+    #: a tight budget truncates the answer rather than the reasoning.
+    max_tokens: int = 8192
 
-    #: A local open-weights path, configured but not exercised here. Present
-    #: because "can this run entirely on our own hardware" is a question that
-    #: gets asked before a pilot, not after.
-    local_base_url: str | None = None
-    local_model: str | None = "qwen2.5-14b-instruct"
+    #: The local open-weights path. Exercised by `evals/record.py --provider
+    #: ollama`, because "can this run entirely on our own hardware" is a
+    #: question that gets asked before a pilot, not after.
+    local_base_url: str | None = "http://127.0.0.1:11434"
+    local_model: str | None = "qwen3:4b-q4_K_M"
 
 
 @dataclass
@@ -234,6 +239,21 @@ class Agent:
                     messages_dropped=dropped_total,
                 )
 
+            # The assistant's own turn goes into the transcript before its
+            # results do. Without it the conversation is a user message
+            # followed by tool results that answer nothing -- which a scripted
+            # stub tolerates and a real provider rejects, because a tool result
+            # has to refer back to the call that produced it.
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {"name": call.name, "arguments": call.arguments}
+                        for call in response.tool_calls
+                    ],
+                }
+            )
             for call in response.tool_calls:
                 rendered = self._call_tool(call, database, log, iteration)
                 messages.append(

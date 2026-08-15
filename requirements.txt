@@ -31,5 +31,19 @@ matplotlib==3.11.1
 # not emit the library's authentication banner.
 kaggle==2.2.4
 
+# Model providers, for recording evaluation transcripts (src/agent/providers.py).
+#
+# The suite runs offline against recorded transcripts and needs neither of
+# these to score a run; they are imported only on the `--live` recording path.
+# The Anthropic SDK resolves ANTHROPIC_API_KEY from the environment itself --
+# nothing in this repository reads, stores or forwards a key value.
+anthropic==0.122.0
+
+# The local Ollama adapter talks to http://127.0.0.1:11434 directly rather than
+# through the `ollama` package: one HTTP client for one provider is less
+# dependency than a second SDK, and httpx is already resolved as an anthropic
+# dependency. Pinned here because src/agent/providers.py imports it by name.
+httpx==0.28.1
+
 # Test
 pytest==9.1.1

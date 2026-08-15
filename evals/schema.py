@@ -19,6 +19,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.agent.providers import ModelIdentity
+
 
 class Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -194,6 +196,13 @@ class RunMetadata(Strict):
     seeds: list[int]
     n_scenarios: int
     harness_version: str
+
+    #: Which model produced the transcripts this run replayed. Optional only so
+    #: the two runs recorded before this field existed still parse; every run
+    #: from here on carries it, and `run_suite` refuses a set of transcripts
+    #: that disagree about it. A results file that cannot be attributed to a
+    #: model cannot be compared to another one.
+    model: ModelIdentity | None = None
 
 
 class RunResults(Strict):
