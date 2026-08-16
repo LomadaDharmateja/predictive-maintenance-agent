@@ -1,0 +1,39 @@
+# Serving dependencies only. Milestone 7.
+#
+# The full requirements.txt is the *development* set: it carries mlflow,
+# matplotlib, kaggle and lightgbm, none of which the service imports. Two
+# reasons to split rather than reuse it:
+#
+#   1. mlflow 3.15 pins a pandas older than the 3.0.5 the feature layer needs,
+#      so `pip install -r requirements.txt` cannot resolve on a clean image at
+#      all. It works locally only because the venv was built incrementally.
+#   2. Every package in a running container is attack surface. The service
+#      needs to answer questions, not to train models or plot curves.
+#
+# Anything imported under src/agent, src/api or src/obs must appear here, and
+# `tests/test_deployment.py` checks that by importing the service's modules and
+# comparing against this file.
+
+# Web layer
+fastapi==0.141.1
+uvicorn==0.52.1
+
+# Contracts. Every request and response model in the API is a Pydantic model
+# that already existed for the tool layer.
+pydantic==2.13.1
+
+# Feature computation and the shipped logistic-regression artefact. The risk
+# tool loads these at request time, which is why the health check exercises the
+# load rather than stat-ing the file.
+numpy==2.5.1
+pandas==3.0.5
+scikit-learn==1.9.0
+joblib==1.5.3
+
+# Model providers. The Anthropic SDK resolves ANTHROPIC_API_KEY itself; no code
+# in this repository reads the value.
+anthropic==0.122.0
+httpx==0.28.1
+
+# Tracing. No exporter here opens a socket.
+opentelemetry-sdk==1.44.0

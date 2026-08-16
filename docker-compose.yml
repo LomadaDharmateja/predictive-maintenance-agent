@@ -1,0 +1,46 @@
+# Local run. Configuration is by environment variable only -- see .env.example.
+#
+# The database and the model artefacts are bind-mounted read-only rather than
+# copied into the image: they are 77 MB of licensed download and a rebuildable
+# artefact respectively, and neither belongs in a layer.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: industrial-ai-agent:local
+    ports:
+      - "127.0.0.1:8000:8000"
+    # env_file is the only way a value reaches this container. Nothing is
+    # inlined here, so the compose file stays committable.
+    env_file:
+      - .env
+    environment:
+      PDM_DATABASE: /data/pdm.db
+      PDM_RUN_STORE: /data/runs
+    volumes:
+      # Read-only: the agent's database posture is read-only at the SQLite
+      # level already, and the mount says so a second time.
+      - ./data/pdm.db:/data/pdm.db:ro
+      - ./models:/app/models:ro
+      - ./data/generated:/app/data/generated:ro
+      # The only writable path, and it holds nothing but run traces.
+      - pdm-runs:/data/runs
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4).status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  pdm-runs:

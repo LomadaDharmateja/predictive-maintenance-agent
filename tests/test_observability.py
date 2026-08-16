@@ -163,15 +163,35 @@ def test_accounting_totals_match_the_span_tree(spans):
     assert r.scenario_id == "scn-1" and r.seed == 1
 
 
+#: Every span duration is rounded to three decimal places independently, so a
+#: sum of children can exceed a parent by pure rounding: each child may round up
+#: by 0.0005 ms and the parent may round down by the same. With four children
+#: that is 0.0025 ms of slack, and a scripted client's spans are short enough
+#: for it to matter -- this assertion failed about one run in three at a 1e-6
+#: tolerance, which is a flaky test rather than a real inversion.
+ROUNDING_SLACK_MS = 0.005
+
+
 def test_wall_clock_covers_model_and_tool_time(spans):
     """The root span must contain its children. Absolute durations are not
     asserted: a scripted client returns in well under a millisecond, so the
     only honest invariant here is the containment relation."""
     r = accounting.from_spans(spans, run_id="test-run")[0]
     assert r.model_ms >= 0 and r.tool_ms >= 0
-    assert r.wall_clock_ms >= r.model_ms + r.tool_ms - 1e-6
+    assert r.wall_clock_ms >= r.model_ms + r.tool_ms - ROUNDING_SLACK_MS
     assert r.overhead_ms >= 0
     assert r.iteration_headroom == f"{r.iterations}/{r.max_iterations}"
+
+
+def test_the_containment_relation_holds_on_the_unrounded_spans(spans):
+    """The same invariant without the rounding, checked on raw nanoseconds so
+    it is exact rather than tolerant."""
+    root = next(s for s in spans if s["name"] == tracing.RUN)
+    children = [s for s in spans if s["parent_span_id"] == root["span_id"]]
+    assert children
+    for child in children:
+        assert child["start_unix_nano"] >= root["start_unix_nano"]
+        assert child["end_unix_nano"] <= root["end_unix_nano"]
 
 
 def test_accounting_round_trips_through_disk(spans, tmp_path):

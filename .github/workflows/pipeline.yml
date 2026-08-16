@@ -83,3 +83,121 @@ jobs:
           name: pytest-report
           path: report.xml
           if-no-files-found: error
+
+  # ---------------------------------------------------------------------
+  # The image is built in CI so that .dockerignore is verified against an
+  # artefact rather than trusted as a document. A correct exclusion list and a
+  # COPY that predates it produce the same file and different images.
+  #
+  # No secret is available to this job, and none is needed: the build installs
+  # from a public index and the inspection runs offline.
+  # ---------------------------------------------------------------------
+  docker:
+    runs-on: ubuntu-latest
+    needs: pytest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image
+        run: docker build -t industrial-ai-agent:ci .
+
+      - name: Refuse an image that embeds a secret, the data or the database
+        run: |
+          set -euo pipefail
+          found=$(docker run --rm --entrypoint sh industrial-ai-agent:ci -c '
+            find / \( -name ".env" -o -name ".env.*" -o -name "*.db" \
+                      -o -name "*.parquet" -o -name "kaggle.json" \
+                      -o -name "id_rsa*" -o -name "*.joblib" \) \
+                 -not -path "/proc/*" 2>/dev/null | head -20')
+          if [ -n "$found" ]; then
+            echo "FAIL: the image embeds excluded content:" >&2
+            echo "$found" >&2
+            exit 1
+          fi
+          echo "OK: no secret, data file or database in the image"
+
+      - name: Refuse build tooling in the final image
+        run: |
+          set -euo pipefail
+          found=$(docker run --rm --entrypoint sh industrial-ai-agent:ci -c '
+            for b in gcc cc g++ make ld pip pip3 easy_install curl wget git; do
+              command -v $b >/dev/null 2>&1 && echo "$b"
+            done
+            python -c "import pip" 2>/dev/null && echo pip-module
+            python -c "import ensurepip" 2>/dev/null && echo ensurepip
+            true')
+          if [ -n "$found" ]; then
+            echo "FAIL: build tooling present in the final image:" >&2
+            echo "$found" >&2
+            exit 1
+          fi
+          echo "OK: no compiler and no package installer in the image"
+
+      - name: Refuse an image that runs as root
+        run: |
+          set -euo pipefail
+          user=$(docker image inspect industrial-ai-agent:ci --format '{{.Config.User}}')
+          id=$(docker run --rm --entrypoint sh industrial-ai-agent:ci -c 'id -u')
+          echo "configured USER=$user runtime uid=$id"
+          [ "$user" = "appuser" ] || { echo "FAIL: USER is not appuser" >&2; exit 1; }
+          [ "$id" != "0" ] || { echo "FAIL: the container runs as root" >&2; exit 1; }
+
+      - name: The service imports inside the image
+        run: |
+          docker run --rm --entrypoint sh industrial-ai-agent:ci -c \
+            'python -c "from src.api.app import app; print(app.version)"'
+
+  # ---------------------------------------------------------------------
+  # Deterministic replay as a gate. Milestone 6 item 3: replaying a recorded
+  # run must reproduce its stored answers exactly, with no model called. It
+  # catches a change to the agent loop that alters behaviour without anybody
+  # noticing, which no unit test would.
+  #
+  # It needs the database, which is built from data/raw and so is unavailable
+  # here -- the job says so and skips rather than passing vacuously.
+  # ---------------------------------------------------------------------
+  replay:
+    runs-on: ubuntu-latest
+    needs: pytest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Replay the most recent recorded run
+        env:
+          PYTHONPATH: .
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import pathlib, subprocess, sys
+
+          results = pathlib.Path("evals/results")
+          runs = sorted(p for p in results.glob("*.json") if "." not in p.stem)
+          if not runs:
+              print("SKIP: no recorded run committed; nothing to replay")
+              sys.exit(0)
+          if not pathlib.Path("data/pdm.db").exists():
+              # Stated rather than silent. The replay needs the database, which
+              # is built from a licensed download this workflow has no
+              # credential for. Saying so keeps a skip from reading as a pass.
+              print("SKIP: data/pdm.db absent (data/raw needs a Kaggle "
+                    "credential this workflow deliberately does not have)")
+              sys.exit(0)
+
+          run_id = runs[-1].stem
+          print(f"replaying {run_id}")
+          sys.exit(subprocess.run(
+              [sys.executable, "-m", "src.obs.replay", run_id]
+          ).returncode)
+          PY
