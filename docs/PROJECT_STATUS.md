@@ -7,6 +7,15 @@ Taken at commit `7693879`, 2026-08-15. Test suite at that moment: **345 passed,
 5 failed.** All five failures are the same cause, and it is the project's single
 blocking problem — see section 5.
 
+> **Superseded — historical record.** This is a dated snapshot, kept because the
+> gaps it names are what Milestones 5–8 were built to close. It is no longer an
+> accurate description of the repository. The blocking problem in section 5 was
+> fixed in Milestone 5, along with the two defects listed under items 7 and 8;
+> the suite is now 519 tests, all passing. For current state read
+> [`../README.md`](../README.md), [`RESULTS_SUMMARY.md`](RESULTS_SUMMARY.md) and
+> [`ENGINEERING_NOTES.md`](ENGINEERING_NOTES.md). Do not cite figures from this
+> file as current.
+
 ---
 
 ## 1. What this project is

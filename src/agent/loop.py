@@ -151,7 +151,7 @@ class AgentResult:
 def load_system_prompt(path: Path = PROMPT_PATH) -> str:
     """Loaded from disk, never duplicated inline.
 
-    `tests/test_agent_loop.py` asserts the file is read and that no module
+    `tests/test_agent.py` asserts the file is read and that no module
     embeds a copy, so the prompt can be versioned and diffed like anything else.
     """
     if not path.exists():
