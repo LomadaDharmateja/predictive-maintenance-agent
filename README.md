@@ -1,3 +1,5 @@
+![CI](https://github.com/LomadaDharmateja/predictive-maintenance-agent/actions/workflows/pipeline.yml/badge.svg)
+
 # Predictive maintenance planning agent
 
 An LLM agent that answers maintenance-planning questions over a 100-machine
