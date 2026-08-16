@@ -1,0 +1,116 @@
+[
+  {
+    "name": "model.call",
+    "trace_id": "4f4c92e095d7e753b2347409c3afdc3d",
+    "span_id": "67c6c730bec9a91f",
+    "parent_span_id": "c47e5d6817211104",
+    "start_unix_nano": 1786907646439054900,
+    "end_unix_nano": 1786907646439054900,
+    "duration_ms": 0.0,
+    "status": "UNSET",
+    "attributes": {
+      "pdm.iteration": 1,
+      "gen_ai.usage.input_tokens": 202,
+      "gen_ai.usage.output_tokens": 428,
+      "pdm.cache_read_tokens": 3217,
+      "pdm.cache_write_tokens": 0,
+      "pdm.stop_reason": "replayed",
+      "pdm.wants_tools": true,
+      "pdm.tool_call_count": 3
+    }
+  },
+  {
+    "name": "tool.call",
+    "trace_id": "4f4c92e095d7e753b2347409c3afdc3d",
+    "span_id": "466a418bb16210c9",
+    "parent_span_id": "c47e5d6817211104",
+    "start_unix_nano": 1786907646439054900,
+    "end_unix_nano": 1786907646443273900,
+    "duration_ms": 4.219,
+    "status": "UNSET",
+    "attributes": {
+      "pdm.tool": "get_failure_risk",
+      "pdm.arguments": "{\"machine_id\": 16, \"as_of\": \"2015-10-13T10:00:00\"}",
+      "pdm.iteration": 1,
+      "pdm.attempt": 1,
+      "pdm.result_type": "Success",
+      "pdm.truncated": false
+    }
+  },
+  {
+    "name": "tool.call",
+    "trace_id": "4f4c92e095d7e753b2347409c3afdc3d",
+    "span_id": "65ff5c9792d2cd67",
+    "parent_span_id": "c47e5d6817211104",
+    "start_unix_nano": 1786907646443273900,
+    "end_unix_nano": 1786907646445277000,
+    "duration_ms": 2.003,
+    "status": "UNSET",
+    "attributes": {
+      "pdm.tool": "get_recent_errors",
+      "pdm.arguments": "{\"machine_id\": 16, \"as_of\": \"2015-10-13T10:00:00\"}",
+      "pdm.iteration": 1,
+      "pdm.attempt": 1,
+      "pdm.result_type": "Success",
+      "pdm.truncated": false
+    }
+  },
+  {
+    "name": "tool.call",
+    "trace_id": "4f4c92e095d7e753b2347409c3afdc3d",
+    "span_id": "ce61101fc00c280e",
+    "parent_span_id": "c47e5d6817211104",
+    "start_unix_nano": 1786907646445277000,
+    "end_unix_nano": 1786907646445781600,
+    "duration_ms": 0.505,
+    "status": "UNSET",
+    "attributes": {
+      "pdm.tool": "get_maintenance_history",
+      "pdm.arguments": "{\"machine_id\": 16, \"as_of\": \"2015-10-13T10:00:00\", \"component\": \"comp3\"}",
+      "pdm.iteration": 1,
+      "pdm.attempt": 1,
+      "pdm.result_type": "Success",
+      "pdm.truncated": false
+    }
+  },
+  {
+    "name": "model.call",
+    "trace_id": "4f4c92e095d7e753b2347409c3afdc3d",
+    "span_id": "c4434f5f840ec874",
+    "parent_span_id": "c47e5d6817211104",
+    "start_unix_nano": 1786907646445781600,
+    "end_unix_nano": 1786907646445781600,
+    "duration_ms": 0.0,
+    "status": "UNSET",
+    "attributes": {
+      "pdm.iteration": 2,
+      "gen_ai.usage.input_tokens": 2318,
+      "gen_ai.usage.output_tokens": 728,
+      "pdm.cache_read_tokens": 3217,
+      "pdm.cache_write_tokens": 0,
+      "pdm.stop_reason": "replayed",
+      "pdm.wants_tools": false,
+      "pdm.tool_call_count": 0
+    }
+  },
+  {
+    "name": "agent.run",
+    "trace_id": "4f4c92e095d7e753b2347409c3afdc3d",
+    "span_id": "c47e5d6817211104",
+    "parent_span_id": null,
+    "start_unix_nano": 1786907646439054900,
+    "end_unix_nano": 1786907646445781600,
+    "duration_ms": 6.727,
+    "status": "UNSET",
+    "attributes": {
+      "pdm.question": "comp3 on machine 16 is reading at the top of the scale. How seriously should I take that?",
+      "pdm.as_of": "2015-10-13T10:00:00",
+      "pdm.scenario_id": "risk-inadequate-uncalibrated-01",
+      "pdm.seed": 1,
+      "pdm.max_iterations": 6,
+      "pdm.iterations": 2,
+      "pdm.hit_iteration_limit": false,
+      "pdm.answer_chars": 2009
+    }
+  }
+]

@@ -120,7 +120,7 @@ security finding as a headline.
 
 | | |
 |---|---|
-| Tests | **519**, no network required |
+| Tests | **547**, no network required |
 | Deterministic builds | Two clean builds produce identical content hashes |
 | Test split | Opened once per horizon, behind a single-consumer token |
 | Prompt caching | 75.5% of input tokens served from cache; input spend down 67.8% |

@@ -236,6 +236,57 @@ def test_warning_adequacy_is_required_on_every_risk():
     assert field.is_required()
 
 
+def test_no_field_is_named_confidence_interval_anywhere_on_a_risk():
+    """The interval is the model's PR-AUC interval, not a predictive one.
+
+    Under its old name, `confidence_interval_low/high`, it was read as
+    uncertainty about the machine being queried -- by the demo UI, which
+    printed it as `95% CI` beside the probability, and by `README.md` and
+    `docs/DATA.md`, which both described the tool as returning "a calibrated
+    probability with a confidence interval". It is not that: on three of four
+    components the interval does not even bracket the probability.
+
+    The name is banned rather than merely corrected, on `ComponentRisk` and on
+    everything reachable from `FailureRisk`, so a future field cannot quietly
+    reintroduce the ambiguity.
+    """
+    assert "model_prauc_ci_low" in ComponentRisk.model_fields
+    assert "model_prauc_ci_high" in ComponentRisk.model_fields
+
+    for names in (set(ComponentRisk.model_fields), _all_field_names(FailureRisk)):
+        for name in names:
+            assert "confidence_interval" not in name, (
+                f"{name!r} revives a name that says 'uncertainty about this "
+                "number' for a field that holds the model's PR-AUC interval"
+            )
+
+
+def test_the_prauc_interval_is_not_presented_as_bracketing_the_probability(database):
+    """The reason the old name was wrong, asserted against real output.
+
+    If this ever fails because every interval brackets its probability, the
+    field has changed meaning and the name must be revisited -- not silently
+    left in place.
+    """
+    from src.agent.contracts import FailureRiskInput
+    from src.agent.tools import dispatch
+
+    result = dispatch(
+        "get_failure_risk",
+        {"machine_id": 30, "as_of": "2015-10-14T13:00:00"},
+        database,
+    )
+    components = result.data.components
+    brackets = [
+        c.model_prauc_ci_low <= c.calibrated_probability <= c.model_prauc_ci_high
+        for c in components
+    ]
+    assert not all(brackets), (
+        "every PR-AUC interval brackets its probability; if that is now true by "
+        "construction the field's meaning has changed and its name should too"
+    )
+
+
 def test_every_tool_has_a_pydantic_input_and_returns_a_model(database):
     for name, (model, _) in REGISTRY.items():
         assert hasattr(model, "model_fields"), name

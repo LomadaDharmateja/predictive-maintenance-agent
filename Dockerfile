@@ -68,6 +68,12 @@ WORKDIR /app
 # trusting that file.
 COPY --chown=appuser:appuser src/ ./src/
 COPY --chown=appuser:appuser evals/prompts/ ./evals/prompts/
+# Demo mode replays these. 4.8 MB of recorded runs plus the scenario
+# definitions, which is what lets the page work in a container with no
+# credential, no provider and no network. Without them `/` renders with no
+# preset buttons -- the page would start, and be useless.
+COPY --chown=appuser:appuser evals/transcripts/ ./evals/transcripts/
+COPY --chown=appuser:appuser evals/scenarios.yaml ./evals/scenarios.yaml
 
 # The database and the model artefacts are mounted at runtime, never baked in:
 # the data is 77 MB of licensed download and the artefacts are rebuildable.

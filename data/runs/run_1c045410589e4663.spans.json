@@ -1,0 +1,98 @@
+[
+  {
+    "name": "model.call",
+    "trace_id": "fa23bf1cc669234b72794833fe5f3cc8",
+    "span_id": "2ef125d7d76a51d3",
+    "parent_span_id": "447644a34ec2e200",
+    "start_unix_nano": 1786908185550421700,
+    "end_unix_nano": 1786908185550421700,
+    "duration_ms": 0.0,
+    "status": "UNSET",
+    "attributes": {
+      "pdm.iteration": 1,
+      "gen_ai.usage.input_tokens": 191,
+      "gen_ai.usage.output_tokens": 184,
+      "pdm.cache_read_tokens": 3217,
+      "pdm.cache_write_tokens": 0,
+      "pdm.stop_reason": "replayed",
+      "pdm.wants_tools": true,
+      "pdm.tool_call_count": 2
+    }
+  },
+  {
+    "name": "tool.call",
+    "trace_id": "fa23bf1cc669234b72794833fe5f3cc8",
+    "span_id": "622b9e44982b354f",
+    "parent_span_id": "447644a34ec2e200",
+    "start_unix_nano": 1786908185550421700,
+    "end_unix_nano": 1786908188978477000,
+    "duration_ms": 3428.055,
+    "status": "UNSET",
+    "attributes": {
+      "pdm.tool": "get_failure_risk",
+      "pdm.arguments": "{\"machine_id\": 30, \"as_of\": \"2015-10-14T13:00:00\"}",
+      "pdm.iteration": 1,
+      "pdm.attempt": 1,
+      "pdm.result_type": "Success",
+      "pdm.truncated": false
+    }
+  },
+  {
+    "name": "tool.call",
+    "trace_id": "fa23bf1cc669234b72794833fe5f3cc8",
+    "span_id": "0aa6140aa5836a5e",
+    "parent_span_id": "447644a34ec2e200",
+    "start_unix_nano": 1786908188978477000,
+    "end_unix_nano": 1786908188981478400,
+    "duration_ms": 3.001,
+    "status": "UNSET",
+    "attributes": {
+      "pdm.tool": "get_parts_position",
+      "pdm.arguments": "{\"component\": \"comp1\"}",
+      "pdm.iteration": 1,
+      "pdm.attempt": 1,
+      "pdm.result_type": "Success",
+      "pdm.truncated": false
+    }
+  },
+  {
+    "name": "model.call",
+    "trace_id": "fa23bf1cc669234b72794833fe5f3cc8",
+    "span_id": "0033ac195257b7b2",
+    "parent_span_id": "447644a34ec2e200",
+    "start_unix_nano": 1786908188981478400,
+    "end_unix_nano": 1786908188981478400,
+    "duration_ms": 0.0,
+    "status": "UNSET",
+    "attributes": {
+      "pdm.iteration": 2,
+      "gen_ai.usage.input_tokens": 2115,
+      "gen_ai.usage.output_tokens": 552,
+      "pdm.cache_read_tokens": 3217,
+      "pdm.cache_write_tokens": 0,
+      "pdm.stop_reason": "replayed",
+      "pdm.wants_tools": false,
+      "pdm.tool_call_count": 0
+    }
+  },
+  {
+    "name": "agent.run",
+    "trace_id": "fa23bf1cc669234b72794833fe5f3cc8",
+    "span_id": "447644a34ec2e200",
+    "parent_span_id": null,
+    "start_unix_nano": 1786908185550421700,
+    "end_unix_nano": 1786908188981478400,
+    "duration_ms": 3431.057,
+    "status": "UNSET",
+    "attributes": {
+      "pdm.question": "Machine 30 \u2014 should I order a comp1 replacement?",
+      "pdm.as_of": "2015-10-14T13:00:00",
+      "pdm.scenario_id": "risk-inadequate-comp1-01",
+      "pdm.seed": 1,
+      "pdm.max_iterations": 6,
+      "pdm.iterations": 2,
+      "pdm.hit_iteration_limit": false,
+      "pdm.answer_chars": 1485
+    }
+  }
+]

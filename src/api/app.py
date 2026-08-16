@@ -30,14 +30,19 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.agent.contracts import ErrorCode, ToolError
 from src.api import config as api_config
+from src.api import demo
 from src.api import errors as api_errors
 from src.api import logging as structured
 from src.obs import accounting, tracing
+
+#: The demo page's files. Inside the package so the container copies them with
+#: the code rather than needing a separate COPY that can be forgotten.
+STATIC_DIR = Path(__file__).parent / "static"
 
 # ----------------------------------------------------------------------
 # Request and response models -- thin wrappers over the existing contracts
@@ -49,11 +54,24 @@ class Strict(BaseModel):
 
 
 class AskRequest(Strict):
-    question: str = Field(min_length=3, max_length=2000)
+    #: Optional only because `scenario_id` can stand in for it. Exactly one of
+    #: the two is required, enforced below rather than by convention.
+    question: str | None = Field(default=None, min_length=3, max_length=2000)
     #: The prediction time. Required in practice: without it the model has no
     #: way to know what "now" is and will guess -- a pilot run guessed
     #: `2025-01-01`, outside the dataset entirely.
     as_of: str | None = None
+    #: Demo mode only. Names the recorded run to replay. The scenario carries
+    #: its own question and prediction time, so both are taken from it and any
+    #: `question` sent alongside is ignored -- a replayed run must answer the
+    #: question that was recorded, not one supplied at request time.
+    scenario_id: str | None = None
+
+    @model_validator(mode="after")
+    def _one_of(self) -> "AskRequest":
+        if not self.question and not self.scenario_id:
+            raise ValueError("one of 'question' or 'scenario_id' is required")
+        return self
 
 
 class ToolCallView(Strict):
@@ -76,6 +94,14 @@ class AskResponse(Strict):
     answer: str
     tool_calls: list[ToolCallView]
     accounting: accounting.RunAccounting
+    #: The two fields the risk contract exists to carry -- adequacy of the
+    #: warning, and whether the probability is trustworthy -- lifted out of the
+    #: tool results so the UI can render them as badges rather than bury them
+    #: in JSON. Derived by `demo.highlights` from `tool_calls`; this is a view,
+    #: not a second declaration, and it is empty when no risk tool ran.
+    highlights: list[dict] = Field(default_factory=list)
+    #: True when the model turns came from a recorded transcript.
+    replayed: bool = False
 
 
 class ErrorResponse(Strict):
@@ -170,6 +196,40 @@ def create_app(settings: api_config.Settings | None = None) -> FastAPI:
             structured.error("database missing", event="ask", error_code="database_error")
             return _error(ErrorCode.DATABASE_ERROR, "the database is not readable")
 
+        # ---- demo mode: replay, never call a provider -------------------
+        if settings.demo_mode:
+            if not body.scenario_id:
+                failure = demo.not_a_preset_error(body.question or "")
+                structured.info("demo rejected free text", event="ask_demo_rejected")
+                return _error(failure.code, failure.message)
+
+            exporter = tracing.MemorySpanExporter()
+            tracing.configure(exporter, reset=True)
+            structured.info(
+                "ask", event="ask_start", provider="replay",
+                scenario_id=body.scenario_id,
+            )
+            try:
+                outcome, identity, replay_client = demo.replay(
+                    body.scenario_id,
+                    database=Path(settings.database),
+                    transcripts=Path(settings.transcripts),
+                    scenarios_path=Path(settings.scenarios),
+                )
+            except demo.DemoUnavailable as exc:
+                structured.error("no transcript", event="ask_error", detail=str(exc))
+                return _error(ErrorCode.NOT_FOUND, str(exc))
+            except Exception as exc:  # noqa: BLE001 - mapped, never swallowed
+                structured.error("replay failed", event="ask_error",
+                                 detail=type(exc).__name__)
+                return _error(ErrorCode.INTERNAL, f"{type(exc).__name__} during replay")
+
+            return _respond(
+                settings, run_id, outcome, exporter.spans, identity,
+                replayed=True,
+            )
+
+        # ---- live: call the configured provider -------------------------
         client = settings.build_client()
         if client is None:
             return _error(
@@ -181,14 +241,14 @@ def create_app(settings: api_config.Settings | None = None) -> FastAPI:
         tracing.configure(exporter, reset=True)
         structured.info(
             "ask", event="ask_start", provider=settings.provider,
-            question_chars=len(body.question),
+            question_chars=len(body.question or ""),
         )
         try:
             agent = Agent(
                 client, database=Path(settings.database),
                 config=LoopConfig(max_iterations=settings.max_iterations),
             )
-            outcome = agent.run(body.question, as_of=body.as_of)
+            outcome = agent.run(body.question or "", as_of=body.as_of)
         except ProviderError as exc:
             # The provider is unreachable or refused the request. That is a
             # dependency failure, not a bug in this service, and 503 tells a
@@ -208,48 +268,9 @@ def create_app(settings: api_config.Settings | None = None) -> FastAPI:
             structured.error("ask failed", event="ask_error", detail=type(exc).__name__)
             return _error(ErrorCode.INTERNAL, f"{type(exc).__name__} during the run")
 
-        calls: list[ToolCallView] = []
-        for entry in outcome.log.entries:
-            if entry.kind not in {"tool_result", "tool_error"}:
-                continue
-            try:
-                parsed = json.loads(entry.detail or "null")
-            except json.JSONDecodeError:
-                parsed = entry.detail
-            calls.append(
-                ToolCallView(
-                    tool=entry.name or "",
-                    arguments=entry.arguments or {},
-                    status="ok" if entry.kind == "tool_result" else "error",
-                    error_code=entry.error_code,
-                    truncated=entry.truncated,
-                    duration_ms=entry.duration_ms or 0.0,
-                    result=parsed,
-                )
-            )
-            structured.info(
-                "tool call", event="tool_call", tool=entry.name,
-                result_type="Success" if entry.kind == "tool_result" else "ToolError",
-                error_code=entry.error_code,
-                duration_ms=entry.duration_ms,
-                argument_keys=structured.argument_keys(entry.arguments),
-            )
-
-        spans = exporter.spans
-        records = accounting.from_spans(
-            spans, run_id=run_id, identity=getattr(client, "identity", None)
-        )
-        record = records[0] if records else accounting.RunAccounting(run_id=run_id)
-        structured.bind(run_id, record.trace_id)
-        structured.info(
-            "answered", event="ask_done", iterations=record.iterations,
-            tool_calls=record.tool_calls, tokens_in=record.tokens_in,
-            tokens_out=record.tokens_out, answer_chars=len(outcome.answer),
-        )
-        _persist(settings, run_id, outcome, calls, record, spans)
-        return AskResponse(
-            run_id=run_id, trace_id=record.trace_id, answer=outcome.answer,
-            tool_calls=calls, accounting=record,
+        return _respond(
+            settings, run_id, outcome, exporter.spans,
+            getattr(client, "identity", None), replayed=False,
         )
 
     # ---- trace -------------------------------------------------------
@@ -267,6 +288,41 @@ def create_app(settings: api_config.Settings | None = None) -> FastAPI:
             return _error(ErrorCode.NOT_FOUND, f"no run {run_id!r}")
         stored = json.loads(path.read_text(encoding="utf-8"))
         return AskResponse(**stored)
+
+    # ---- demo UI -----------------------------------------------------
+    @app.get("/", include_in_schema=False)
+    def index() -> Any:
+        """The demo page. One HTML file, one JS file, no build step, no CDN.
+
+        Served from disk rather than templated so there is nothing to compile
+        and nothing to keep in step with a renderer.
+        """
+        page = STATIC_DIR / "index.html"
+        if not page.exists():
+            return _error(ErrorCode.NOT_FOUND, "the demo page is not installed")
+        return FileResponse(page, media_type="text/html")
+
+    @app.get("/app.js", include_in_schema=False)
+    def script() -> Any:
+        """The one script. Named explicitly rather than mounted as a directory
+        so nothing else in the package can be reached over HTTP."""
+        script_path = STATIC_DIR / "app.js"
+        if not script_path.exists():
+            return _error(ErrorCode.NOT_FOUND, "app.js is not installed")
+        return FileResponse(script_path, media_type="application/javascript")
+
+    @app.get("/v1/demo/presets", include_in_schema=False)
+    def presets() -> Any:
+        settings: api_config.Settings = app.state.settings
+        return {
+            "demo_mode": settings.demo_mode,
+            "provider": "replay" if settings.demo_mode else settings.provider,
+            "model": "recorded transcript" if settings.demo_mode else settings.model_name,
+            "presets": demo.available(
+                transcripts=Path(settings.transcripts),
+                scenarios_path=Path(settings.scenarios),
+            ),
+        }
 
     # ---- health ------------------------------------------------------
     @app.get("/health", response_model=HealthResponse)
@@ -286,19 +342,76 @@ def create_app(settings: api_config.Settings | None = None) -> FastAPI:
     return app
 
 
+def _respond(settings, run_id, outcome, spans, identity, replayed: bool) -> AskResponse:
+    """Turn a finished run into the response body. One path, both modes.
+
+    The demo and live paths differ only in where the model's turns came from.
+    Everything after that -- the tool-call view, the accounting, the persisted
+    record -- is this function, so a replayed run cannot be shaped differently
+    from a live one.
+    """
+    calls: list[ToolCallView] = []
+    for entry in outcome.log.entries:
+        if entry.kind not in {"tool_result", "tool_error"}:
+            continue
+        try:
+            parsed = json.loads(entry.detail or "null")
+        except json.JSONDecodeError:
+            parsed = entry.detail
+        calls.append(
+            ToolCallView(
+                tool=entry.name or "",
+                arguments=entry.arguments or {},
+                status="ok" if entry.kind == "tool_result" else "error",
+                error_code=entry.error_code,
+                truncated=entry.truncated,
+                duration_ms=entry.duration_ms or 0.0,
+                result=parsed,
+            )
+        )
+        structured.info(
+            "tool call", event="tool_call", tool=entry.name,
+            result_type="Success" if entry.kind == "tool_result" else "ToolError",
+            error_code=entry.error_code,
+            duration_ms=entry.duration_ms,
+            argument_keys=structured.argument_keys(entry.arguments),
+        )
+
+    # Accounting is read from the spans, never recomputed here. Milestone 6
+    # item 5 made `src/obs/accounting.py` the single place a token is priced,
+    # and a UI that did its own arithmetic would be the second.
+    records = accounting.from_spans(spans, run_id=run_id, identity=identity)
+    record = records[0] if records else accounting.RunAccounting(run_id=run_id)
+    structured.bind(run_id, record.trace_id)
+    structured.info(
+        "answered", event="ask_done", iterations=record.iterations,
+        tool_calls=record.tool_calls, tokens_in=record.tokens_in,
+        tokens_out=record.tokens_out, answer_chars=len(outcome.answer),
+        replayed=replayed,
+    )
+    payload = AskResponse(
+        run_id=run_id, trace_id=record.trace_id, answer=outcome.answer,
+        tool_calls=calls, accounting=record,
+        highlights=demo.highlights(calls), replayed=replayed,
+    )
+    _persist(settings, run_id, payload, spans)
+    return payload
+
+
 def _safe_run_id(run_id: str) -> bool:
     return run_id.replace("_", "").replace("-", "").isalnum() and len(run_id) <= 64
 
 
-def _persist(settings, run_id, outcome, calls, record, spans) -> None:
-    """Write the run so `GET /v1/runs/{id}` can serve it. Best effort."""
+def _persist(settings, run_id, payload: "AskResponse", spans) -> None:
+    """Write the run so `GET /v1/runs/{id}` can serve it. Best effort.
+
+    The *served* payload is written, not a rebuilt copy. Rebuilding it here is
+    how the stored run silently lost `highlights` and `replayed`: a refetched
+    run reported itself as live when it had been replayed.
+    """
     store = Path(settings.run_store)
     try:
         store.mkdir(parents=True, exist_ok=True)
-        payload = AskResponse(
-            run_id=run_id, trace_id=record.trace_id, answer=outcome.answer,
-            tool_calls=calls, accounting=record,
-        )
         (store / f"{run_id}.json").write_text(
             payload.model_dump_json(indent=2), encoding="utf-8"
         )

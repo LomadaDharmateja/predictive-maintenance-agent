@@ -10,8 +10,10 @@ deserves a technician's time in the next two weeks.
 Questions it answers:
 
 - **Risk.** *"What's the comp2 position on machine 96 at the moment?"* — a
-  calibrated 14-day probability, with a confidence interval and an explicit
-  statement of whether that probability is trustworthy.
+  calibrated 14-day probability, with an explicit statement of whether that
+  probability is trustworthy, and the model's PR-AUC interval for that
+  component. (That interval describes the *model*, not this machine; there is
+  no per-row predictive interval, and the contract says so where it sets it.)
 - **Warning adequacy.** *"comp4 on machine 8 is showing high. The 12-day part is
   the one I can actually get — does the warning give me enough time to use it?"*
   — per component and per part, with the margin named.
@@ -27,7 +29,7 @@ Questions it answers:
 
 | It does | It does not |
 |---|---|
-| Flag which component on which machine is at elevated risk over 14 days, as a calibrated probability with a confidence interval | Say *when* inside that window, or how severe |
+| Flag which component on which machine is at elevated risk over 14 days, as a calibrated probability carrying whether it is trustworthy | Say *when* inside that window, how severe, or how uncertain this particular machine's number is |
 | State whether its warning is long enough to act on, per component and per part | Recommend ordering a part on the strength of a prediction |
 | Report parts position from stock on hand and observed consumption | Derive a reorder decision from a risk score |
 | Say plainly when a probability is not trustworthy, or when a tool failed | Fill a gap with an inference presented as a retrieval |
@@ -89,6 +91,58 @@ rather than shipping.
 
 ---
 
+## The demo interface
+
+A single page at `/`, served by the same FastAPI app. It defaults to **demo
+mode**: every answer replays a recorded transcript rather than calling a model,
+so the page needs no API key, costs nothing, and works with no network.
+
+```bash
+docker compose up --build      # then open http://localhost:8000/
+```
+
+Eight preset questions cover a lookup, a risk question whose warning is long
+enough to act on, one whose warning is not, a parts question, a fleet-level
+question and one the system cannot answer. Every answer is followed by the
+agent's actual tool calls, with arguments and results — the trace is the point,
+not the prose.
+
+### The lead-time finding, on the page
+
+`warning_adequacy` and `calibrated` are rendered as badges rather than left in
+the JSON, because they are what the system exists to say. Here comp1 reads 26.2%
+and the agent still declines to recommend an order: the warning is 24 hours and
+both comp1 parts take 10 and 17 days.
+
+![The demo page answering a risk question. Badges read "not calibrated" and "warning insufficient"; the agent declines to recommend ordering a part.](docs/images/demo-risk-insufficient.png)
+
+### A parts question never touches the risk model
+
+One tool call, `get_parts_position`, and no risk badges — the separation
+enforced by `tests/test_agent_parts_independence.py`, visible in the trace.
+
+![The demo page answering a parts question with a single get_parts_position call and no risk output.](docs/images/demo-parts-position.png)
+
+### An honest refusal
+
+The system has no diagnostic model, so it says so instead of assembling a
+plausible cause from correlations.
+
+![The demo page declining to attribute a root cause, listing what it can and cannot tell the planner.](docs/images/demo-unanswerable.png)
+
+Run accounting under every answer — tokens, cost, latency, iterations used —
+comes from `src/obs/accounting.py`, the one place a token is priced. The UI
+displays it and computes none of it.
+
+To answer free text instead, configure a provider and set `PDM_DEMO_MODE=0`.
+Demo mode refuses free text rather than quietly falling through to a paid
+provider.
+
+Screenshots are regenerated with `python -m scripts.capture_demo`, which needs
+a browser binary and is deliberately not part of the test suite.
+
+---
+
 ## Architecture
 
 ```mermaid
@@ -121,16 +175,19 @@ flowchart TB
     end
 
     api["FastAPI<br/>/v1/ask  /v1/runs/{id}  /health"]
+    ui["Demo page at /<br/>presets, trace, accounting<br/>replays transcripts by default"]
 
     model --> risk
     db --> risk & parts & hist & errs & prof & find
     risk & parts & hist & errs & prof & find --> loop
     loop <--> prov
     loop --> span --> acct
-    loop --> api
+    loop --> api --> ui
+    acct --> ui
 
     evals["Eval harness<br/>41 scenarios × 3 seeds<br/>recorded transcripts"]
     loop -.replayed offline.-> evals
+    evals -.same transcripts.-> ui
 
     style model fill:#e8dcc8,stroke:#8a5a2b
     style risk fill:#e8dcc8,stroke:#8a5a2b
@@ -238,13 +295,14 @@ make eval-record PROVIDER=anthropic THROTTLE=1
 make trace-replay RUN=<run_id>   # replay offline; fails if it diverges
 make trace-view   RUN=<run_id>   # self-contained offline HTML trace
 
-# 6. Service
+# 6. Service and demo page
 cp .env.example .env             # fill in; .env is gitignored and never in an image
 docker compose up --build
 curl localhost:8000/health
+open http://localhost:8000/      # the demo page, replaying recorded runs
 ```
 
-**519 tests, no network required.** `pytest` runs everything; the tests that
+**547 tests, no network required.** `pytest` runs everything; the tests that
 need the licensed download skip themselves, and CI asserts a floor on the
 executed count so "everything skipped" cannot read as green.
 

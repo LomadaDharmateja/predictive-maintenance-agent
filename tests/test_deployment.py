@@ -164,13 +164,38 @@ def test_the_image_contains_no_secret_no_data_and_no_database(image):
 
 @docker_required
 def test_the_image_omits_the_repository_directories_that_must_not_ship(image):
+    """`evals/scenarios.yaml` and `evals/transcripts/` are deliberately absent
+    from this list as of Milestone 9.
+
+    They were excluded when `evals/` was purely test material. Demo mode made
+    them service assets: the page defaults to replaying recorded runs, and
+    without them a container starts and serves a page with no example
+    questions on it -- working, and useless. 4.9 MB is a cheap price for the
+    default mode functioning out of the box. Everything else here stays out.
+    """
     listing = _in_image(
         image,
         "for p in /app/.env /app/data /app/models /app/archive /app/.git "
-        "/app/tests /app/mlruns /app/evals/scenarios.yaml; do "
+        "/app/tests /app/mlruns /app/evals/runner.py /app/evals/results; do "
         '[ -e "$p" ] && echo "PRESENT $p"; done',
     )
     assert listing.strip() == "", f"unexpected content in the image:\n{listing}"
+
+
+@docker_required
+def test_the_image_carries_what_demo_mode_needs(image):
+    """The converse: the default mode must work in the container.
+
+    Asserted against the built image because a `.dockerignore` entry or a
+    forgotten `COPY` would leave the page with no buttons, and that failure is
+    invisible until someone opens it."""
+    listing = _in_image(
+        image,
+        "for p in /app/src/api/static/index.html /app/src/api/static/app.js "
+        "/app/evals/scenarios.yaml /app/evals/transcripts; do "
+        '[ -e "$p" ] || echo "MISSING $p"; done',
+    )
+    assert listing.strip() == "", f"demo mode cannot work in this image:\n{listing}"
 
 
 @docker_required

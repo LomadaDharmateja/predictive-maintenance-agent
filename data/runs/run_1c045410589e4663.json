@@ -1,0 +1,322 @@
+{
+  "run_id": "run_1c045410589e4663",
+  "trace_id": "fa23bf1cc669234b72794833fe5f3cc8",
+  "answer": "**Short answer: don't order comp1 based on the risk score — the warning can't support that decision. Order (or not) based on stock cover instead.**\n\n**Risk (from `get_failure_risk`, machine 30, as_of 2015-10-14):** comp1 scores 0.262, but that probability is not established as better than the base rate on held-out data (`calibrated: false`), so treat it as a ranking signal, not a likelihood. Its `warning_adequacy` is **insufficient** — meaning even if the score were reliable, the detection lead time (~24 hours) is far shorter than either comp1 part's supplier lead time (10 and 17 days). A warning that arrives a day before failure cannot be acted on with a 10–17 day lead time part. So this number should not drive an order.\n\n**Parts position (from `get_parts_position`, comp1):**\n- PN-COMP1-001 (model1): 22 in stock, ~41.7 units/30d consumption → **15.8 days of cover**, 10-day lead time.\n- PN-COMP1-002 (models 2–4): 32 in stock, same consumption rate → **23.0 days of cover**, 17-day lead time.\n\nCover exceeds lead time for both parts, so on stock/consumption grounds alone there's no urgent reorder trigger right now for either comp1 part — but PN-COMP1-001's margin (15.8 days cover vs 10-day lead time) is tighter and worth watching if consumption rises.\n\n**What I can't tell you:** which specific machine/part will fail, or when within any 14-day window; and I can't validate this against real plant behavior — this is trained on the Microsoft Azure PdM simulation only.",
+  "tool_calls": [
+    {
+      "tool": "get_failure_risk",
+      "arguments": {
+        "machine_id": 30,
+        "as_of": "2015-10-14T13:00:00"
+      },
+      "status": "ok",
+      "error_code": null,
+      "truncated": false,
+      "duration_ms": 3427.99,
+      "result": {
+        "status": "ok",
+        "data": {
+          "machine_id": 30,
+          "as_of": "2015-10-14T13:00:00",
+          "horizon_days": 14,
+          "model_family": "logreg",
+          "components": [
+            {
+              "component": "comp1",
+              "calibrated_probability": 0.262,
+              "calibrated": false,
+              "brier_skill_holdout": 0.0049,
+              "brier_skill_ci_low": -0.1041,
+              "brier_skill_ci_high": 0.0251,
+              "confidence_interval_low": 0.0176,
+              "confidence_interval_high": 0.1239,
+              "threshold": 0.3078651685393259,
+              "threshold_cost_ratio": 10.0,
+              "exceeds_threshold": false,
+              "warning_adequacy": "insufficient",
+              "per_part_adequacy": [
+                {
+                  "part_id": "PN-COMP1-001",
+                  "lead_time_days": 10,
+                  "adequacy": "insufficient",
+                  "detection_lead_hours": 24.0
+                },
+                {
+                  "part_id": "PN-COMP1-002",
+                  "lead_time_days": 17,
+                  "adequacy": "insufficient",
+                  "detection_lead_hours": 24.0
+                }
+              ]
+            },
+            {
+              "component": "comp2",
+              "calibrated_probability": 0.0833,
+              "calibrated": true,
+              "brier_skill_holdout": 0.0667,
+              "brier_skill_ci_low": 0.0227,
+              "brier_skill_ci_high": 0.0945,
+              "confidence_interval_low": 0.2056,
+              "confidence_interval_high": 0.3577,
+              "threshold": 0.39382022471910116,
+              "threshold_cost_ratio": 10.0,
+              "exceeds_threshold": false,
+              "warning_adequacy": "insufficient",
+              "per_part_adequacy": [
+                {
+                  "part_id": "PN-COMP2-001",
+                  "lead_time_days": 32,
+                  "adequacy": "insufficient",
+                  "detection_lead_hours": 335.0
+                }
+              ]
+            },
+            {
+              "component": "comp3",
+              "calibrated_probability": 0.0,
+              "calibrated": false,
+              "brier_skill_holdout": 0.154,
+              "brier_skill_ci_low": -0.4086,
+              "brier_skill_ci_high": 0.265,
+              "confidence_interval_low": 0.0846,
+              "confidence_interval_high": 0.4964,
+              "threshold": 0.1258426966292135,
+              "threshold_cost_ratio": 10.0,
+              "exceeds_threshold": false,
+              "warning_adequacy": "insufficient",
+              "per_part_adequacy": [
+                {
+                  "part_id": "PN-COMP3-001",
+                  "lead_time_days": 31,
+                  "adequacy": "insufficient",
+                  "detection_lead_hours": 326.5
+                },
+                {
+                  "part_id": "PN-COMP3-002",
+                  "lead_time_days": 15,
+                  "adequacy": "insufficient",
+                  "detection_lead_hours": 326.5
+                },
+                {
+                  "part_id": "PN-COMP3-003",
+                  "lead_time_days": 31,
+                  "adequacy": "insufficient",
+                  "detection_lead_hours": 326.5
+                }
+              ]
+            },
+            {
+              "component": "comp4",
+              "calibrated_probability": 0.166,
+              "calibrated": false,
+              "brier_skill_holdout": 0.1203,
+              "brier_skill_ci_low": -0.0318,
+              "brier_skill_ci_high": 0.1983,
+              "confidence_interval_low": 0.1301,
+              "confidence_interval_high": 0.4489,
+              "threshold": 0.045,
+              "threshold_cost_ratio": 10.0,
+              "exceeds_threshold": true,
+              "warning_adequacy": "marginal",
+              "per_part_adequacy": [
+                {
+                  "part_id": "PN-COMP4-001",
+                  "lead_time_days": 12,
+                  "adequacy": "marginal",
+                  "detection_lead_hours": 335.0
+                },
+                {
+                  "part_id": "PN-COMP4-002",
+                  "lead_time_days": 23,
+                  "adequacy": "insufficient",
+                  "detection_lead_hours": 335.0
+                },
+                {
+                  "part_id": "PN-COMP4-003",
+                  "lead_time_days": 34,
+                  "adequacy": "insufficient",
+                  "detection_lead_hours": 335.0
+                }
+              ]
+            }
+          ],
+          "caveat": "Calibrated probability that this component fails within 14 days. It does not say when inside that window, or how severe. Trained on simulated data (Microsoft Azure PdM); no claim about real plant behaviour is supported. Check warning_adequacy before treating any of this as actionable, and check `calibrated`: where it is false, the probability is not established as better than simply reporting the base rate and must not be quoted as a reliable likelihood."
+        },
+        "truncated": false
+      }
+    },
+    {
+      "tool": "get_parts_position",
+      "arguments": {
+        "component": "comp1"
+      },
+      "status": "ok",
+      "error_code": null,
+      "truncated": false,
+      "duration_ms": 2.59,
+      "result": {
+        "status": "ok",
+        "data": {
+          "parts": [
+            {
+              "part_id": "PN-COMP1-001",
+              "component": "comp1",
+              "compatible_models": [
+                "model1"
+              ],
+              "stock_quantity": 22,
+              "unit_cost": 471.05,
+              "supplier_id": "SUP-001",
+              "lead_time_days": 10,
+              "observed_consumption_per_30d": 41.658,
+              "days_of_cover": 15.8
+            },
+            {
+              "part_id": "PN-COMP1-002",
+              "component": "comp1",
+              "compatible_models": [
+                "model2",
+                "model3",
+                "model4"
+              ],
+              "stock_quantity": 32,
+              "unit_cost": 241.14,
+              "supplier_id": "SUP-005",
+              "lead_time_days": 17,
+              "observed_consumption_per_30d": 41.658,
+              "days_of_cover": 23.0
+            }
+          ],
+          "basis": "Stock on hand and consumption observed from the replacement log. No risk score or prediction is used: the model's effective warning is shorter than the lead time for 8 of 9 parts, so predictions cannot drive reordering. See docs/SIGNAL_ANALYSIS.md section 4."
+        },
+        "truncated": false
+      }
+    }
+  ],
+  "accounting": {
+    "run_id": "run_1c045410589e4663",
+    "scenario_id": "risk-inadequate-comp1-01",
+    "seed": 1,
+    "trace_id": "fa23bf1cc669234b72794833fe5f3cc8",
+    "tokens_in": 2306,
+    "tokens_out": 736,
+    "cache_read": 6434,
+    "cache_write": 0,
+    "estimated_cost_usd": 0.019888,
+    "wall_clock_ms": 3431.057,
+    "model_ms": 0.0,
+    "tool_ms": 3431.056,
+    "tool_calls": 2,
+    "tool_errors": 0,
+    "iterations": 2,
+    "max_iterations": 6,
+    "hit_iteration_limit": false,
+    "provider": "anthropic",
+    "model": "claude-sonnet-5"
+  },
+  "highlights": [
+    {
+      "machine_id": 30,
+      "component": "comp1",
+      "probability": 0.262,
+      "ci_low": 0.0176,
+      "ci_high": 0.1239,
+      "calibrated": false,
+      "warning_adequacy": "insufficient",
+      "exceeds_threshold": false,
+      "parts": [
+        {
+          "part_id": "PN-COMP1-001",
+          "lead_time_days": 10,
+          "adequacy": "insufficient",
+          "detection_lead_hours": 24.0
+        },
+        {
+          "part_id": "PN-COMP1-002",
+          "lead_time_days": 17,
+          "adequacy": "insufficient",
+          "detection_lead_hours": 24.0
+        }
+      ]
+    },
+    {
+      "machine_id": 30,
+      "component": "comp2",
+      "probability": 0.0833,
+      "ci_low": 0.2056,
+      "ci_high": 0.3577,
+      "calibrated": true,
+      "warning_adequacy": "insufficient",
+      "exceeds_threshold": false,
+      "parts": [
+        {
+          "part_id": "PN-COMP2-001",
+          "lead_time_days": 32,
+          "adequacy": "insufficient",
+          "detection_lead_hours": 335.0
+        }
+      ]
+    },
+    {
+      "machine_id": 30,
+      "component": "comp3",
+      "probability": 0.0,
+      "ci_low": 0.0846,
+      "ci_high": 0.4964,
+      "calibrated": false,
+      "warning_adequacy": "insufficient",
+      "exceeds_threshold": false,
+      "parts": [
+        {
+          "part_id": "PN-COMP3-001",
+          "lead_time_days": 31,
+          "adequacy": "insufficient",
+          "detection_lead_hours": 326.5
+        },
+        {
+          "part_id": "PN-COMP3-002",
+          "lead_time_days": 15,
+          "adequacy": "insufficient",
+          "detection_lead_hours": 326.5
+        },
+        {
+          "part_id": "PN-COMP3-003",
+          "lead_time_days": 31,
+          "adequacy": "insufficient",
+          "detection_lead_hours": 326.5
+        }
+      ]
+    },
+    {
+      "machine_id": 30,
+      "component": "comp4",
+      "probability": 0.166,
+      "ci_low": 0.1301,
+      "ci_high": 0.4489,
+      "calibrated": false,
+      "warning_adequacy": "marginal",
+      "exceeds_threshold": true,
+      "parts": [
+        {
+          "part_id": "PN-COMP4-001",
+          "lead_time_days": 12,
+          "adequacy": "marginal",
+          "detection_lead_hours": 335.0
+        },
+        {
+          "part_id": "PN-COMP4-002",
+          "lead_time_days": 23,
+          "adequacy": "insufficient",
+          "detection_lead_hours": 335.0
+        },
+        {
+          "part_id": "PN-COMP4-003",
+          "lead_time_days": 34,
+          "adequacy": "insufficient",
+          "detection_lead_hours": 335.0
+        }
+      ]
+    }
+  ],
+  "replayed": true
+}

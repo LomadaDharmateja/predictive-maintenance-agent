@@ -163,8 +163,22 @@ class ComponentRisk(Strict):
     brier_skill_holdout: float
     brier_skill_ci_low: float
     brier_skill_ci_high: float
-    confidence_interval_low: float = Field(ge=0.0, le=1.0)
-    confidence_interval_high: float = Field(ge=0.0, le=1.0)
+    #: The **model's** PR-AUC bootstrap interval for this component, resampled
+    #: at the failure-event level. It describes how well the model separates
+    #: this component across the fleet; it is *not* a predictive interval for
+    #: the machine being queried, and on three of four components it does not
+    #: bracket `calibrated_probability` at all.
+    #:
+    #: Named `confidence_interval_low/high` until Milestone 9. That name said
+    #: "uncertainty about this number" and the field is nothing of the kind:
+    #: the demo UI printed it as `95% CI` beside the probability, and both
+    #: `README.md` and `docs/DATA.md` described the tool as returning "a
+    #: calibrated probability with a confidence interval". A comment warning
+    #: against the misreading sat directly above the assignment in
+    #: `src/agent/risk.py` the whole time, and was not enough. The name is the
+    #: documentation that gets read.
+    model_prauc_ci_low: float = Field(ge=0.0, le=1.0)
+    model_prauc_ci_high: float = Field(ge=0.0, le=1.0)
     #: The cost-derived threshold in force, and the ratio it came from.
     threshold: float = Field(ge=0.0, le=1.0)
     threshold_cost_ratio: float

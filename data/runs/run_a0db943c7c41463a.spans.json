@@ -1,0 +1,80 @@
+[
+  {
+    "name": "model.call",
+    "trace_id": "b64a538048884bfb93eb26749c4fb330",
+    "span_id": "65bb44b60320ab54",
+    "parent_span_id": "f76bdb838f308d91",
+    "start_unix_nano": 1786908190907931100,
+    "end_unix_nano": 1786908190907931100,
+    "duration_ms": 0.0,
+    "status": "UNSET",
+    "attributes": {
+      "pdm.iteration": 1,
+      "gen_ai.usage.input_tokens": 193,
+      "gen_ai.usage.output_tokens": 85,
+      "pdm.cache_read_tokens": 3217,
+      "pdm.cache_write_tokens": 0,
+      "pdm.stop_reason": "replayed",
+      "pdm.wants_tools": true,
+      "pdm.tool_call_count": 1
+    }
+  },
+  {
+    "name": "tool.call",
+    "trace_id": "b64a538048884bfb93eb26749c4fb330",
+    "span_id": "8473509f25da54ca",
+    "parent_span_id": "f76bdb838f308d91",
+    "start_unix_nano": 1786908190907931100,
+    "end_unix_nano": 1786908190911103900,
+    "duration_ms": 3.173,
+    "status": "UNSET",
+    "attributes": {
+      "pdm.tool": "get_parts_position",
+      "pdm.arguments": "{\"component\": \"comp3\"}",
+      "pdm.iteration": 1,
+      "pdm.attempt": 1,
+      "pdm.result_type": "Success",
+      "pdm.truncated": false
+    }
+  },
+  {
+    "name": "model.call",
+    "trace_id": "b64a538048884bfb93eb26749c4fb330",
+    "span_id": "4b691aec6f52f762",
+    "parent_span_id": "f76bdb838f308d91",
+    "start_unix_nano": 1786908190911103900,
+    "end_unix_nano": 1786908190911103900,
+    "duration_ms": 0.0,
+    "status": "UNSET",
+    "attributes": {
+      "pdm.iteration": 2,
+      "gen_ai.usage.input_tokens": 702,
+      "gen_ai.usage.output_tokens": 560,
+      "pdm.cache_read_tokens": 3217,
+      "pdm.cache_write_tokens": 0,
+      "pdm.stop_reason": "replayed",
+      "pdm.wants_tools": false,
+      "pdm.tool_call_count": 0
+    }
+  },
+  {
+    "name": "agent.run",
+    "trace_id": "b64a538048884bfb93eb26749c4fb330",
+    "span_id": "f76bdb838f308d91",
+    "parent_span_id": null,
+    "start_unix_nano": 1786908190907931100,
+    "end_unix_nano": 1786908190911103900,
+    "duration_ms": 3.173,
+    "status": "UNSET",
+    "attributes": {
+      "pdm.question": "What is our stock position on comp3 parts, and how long would it last?",
+      "pdm.as_of": "2015-10-15T07:00:00",
+      "pdm.scenario_id": "parts-position-comp3-01",
+      "pdm.seed": 1,
+      "pdm.max_iterations": 6,
+      "pdm.iterations": 2,
+      "pdm.hit_iteration_limit": false,
+      "pdm.answer_chars": 1367
+    }
+  }
+]

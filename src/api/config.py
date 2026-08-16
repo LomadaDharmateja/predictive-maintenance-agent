@@ -28,6 +28,12 @@ ENV_VARS = (
     "PDM_LOG_LEVEL",
     "PDM_ENABLE_DOCS",
     "PDM_OLLAMA_BASE_URL",
+    # Demo mode replays recorded transcripts instead of calling a model.
+    # Defaults to on: the page has to work for a visitor with no key, and a
+    # default that spends money on first click is the wrong default.
+    "PDM_DEMO_MODE",
+    "PDM_TRANSCRIPTS",
+    "PDM_SCENARIOS",
     # Resolved by the Anthropic SDK, never read by this repository. Named here
     # so `.env.example` documents it; nothing below ever loads its value.
     "ANTHROPIC_API_KEY",
@@ -51,6 +57,11 @@ class Settings:
     log_level: str = "INFO"
     enable_docs: bool = True
     ollama_base_url: str = "http://127.0.0.1:11434"
+    #: Replay recorded transcripts rather than calling a provider. On by
+    #: default so the demo page costs nothing and needs no credential.
+    demo_mode: bool = True
+    transcripts: str = "evals/transcripts"
+    scenarios: str = "evals/scenarios.yaml"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -65,6 +76,9 @@ class Settings:
             ollama_base_url=os.environ.get(
                 "PDM_OLLAMA_BASE_URL", "http://127.0.0.1:11434"
             ),
+            demo_mode=_flag("PDM_DEMO_MODE", True),
+            transcripts=os.environ.get("PDM_TRANSCRIPTS", "evals/transcripts"),
+            scenarios=os.environ.get("PDM_SCENARIOS", "evals/scenarios.yaml"),
         )
 
     def model_config_for_agent(self) -> ModelConfig:

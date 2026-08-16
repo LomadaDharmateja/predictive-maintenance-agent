@@ -36,7 +36,7 @@ So the system does two separate things, and keeping them separate is the design:
 
 | It does | It does not |
 |---|---|
-| Flag which component on which machine is at elevated risk in the next 14 days, as a calibrated probability with a confidence interval | Say when inside that window, or how severe |
+| Flag which component on which machine is at elevated risk in the next 14 days, as a calibrated probability carrying whether it is trustworthy | Say when inside that window, how severe, or how uncertain this particular machine's number is |
 | State whether its warning is long enough to be acted on, per component and per part | Recommend ordering a part on the strength of a prediction |
 | Report parts position from stock on hand and observed consumption rate | Derive a reorder decision from a risk score |
 
@@ -315,11 +315,11 @@ project.
 
 | Split | Period | Prediction times | Rows |
 |---|---|---|---|
-| Train | 2015-01-01 to 2015-09-30 | 6,522 | 652,200 |
-| Validation | 2015-10-01 to 2015-10-31 | 720 | 72,000 |
-| Test | 2015-11-01 to 2015-12-31 | 1,423 | 142,300 |
+| Train | 2015-01-01 to 2015-09-30 | 6,210 | 621,000 |
+| Validation | 2015-10-01 to 2015-10-31 | 408 | 40,800 |
+| Test | 2015-11-01 to 2015-12-31 | 1,111 | 111,100 |
 
-A 24-hour embargo — the label horizon — is dropped from the end of each split, so no
+A **14-day** embargo — the label horizon — is dropped from the end of each split, so no
 row's label window reaches into the next one. Implemented in
 `src/features/config.py` as a quantity derived from the horizon, and asserted in
 `tests/test_no_future_leakage.py`. Feature windows reaching *backwards* across a split
@@ -327,9 +327,20 @@ boundary are permitted and correct; see `docs/FEATURES.md`.
 
 Cross-validation within train uses rolling origin, not k-fold.
 
-**Consequence, stated honestly:** the test period contains roughly 127 failure events,
-which produce 2,590 positive rows. Recall estimated on this set carries substantial
-uncertainty and is reported with a confidence interval, not as a point estimate.
+**Consequence, stated honestly:** 95 failure events fall strictly inside the test
+period, and 121 are reachable from a test prediction time within the 14-day horizon.
+Those produce 5,968 / 12,716 / 5,169 / 6,413 positive rows for comp1–comp4 — high row
+counts resting on few independent events, because one failure positively labels up to
+336 consecutive prediction times for that machine. Recall estimated on this set carries
+substantial uncertainty, which is why every interval is bootstrapped at the
+**failure-event** level rather than the row level.
+
+> **Corrected at Milestone 9.** This block previously carried the 24-hour
+> framing's numbers — a 24-hour embargo, 6,522/720/1,423 prediction times, and
+> "roughly 127 failure events, which produce 2,590 positive rows" — while
+> section 4 of this same document defined the label as `(t, t + 14 days]`. The
+> figures above are read from `data/generated/build_manifest.json` and the
+> `failures` table.
 
 A secondary evaluation holds out machines rather than time, to measure generalisation
 to unseen units. Given that two machines never fail, holdout composition is checked

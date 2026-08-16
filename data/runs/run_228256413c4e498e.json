@@ -1,0 +1,89 @@
+{
+  "run_id": "run_228256413c4e498e",
+  "trace_id": "00a312d9eb10d85930fa63aa03029bee",
+  "answer": "Here's the comp3 stock position (from `get_parts_position`, based purely on stock and observed consumption — no risk score involved):\n\n| Part | Compatible Models | Stock | Consumption/30d | Days of Cover | Lead Time |\n|---|---|---|---|---|---|\n| PN-COMP3-001 | model3 | 5 | 41.87 | **3.6 days** | 31 days |\n| PN-COMP3-002 | model2, model4 | 21 | 41.87 | **15.0 days** | 15 days |\n| PN-COMP3-003 | model1 | 40 | 41.87 | **28.7 days** | 31 days |\n\n**Read:**\n- **PN-COMP3-001 (model3)** is the critical one: only 3.6 days of cover against a 31-day lead time. That's already a shortfall — an order placed today wouldn't land before stock runs out.\n- **PN-COMP3-002 (model2/model4)** has cover roughly equal to its lead time (15 vs 15) — borderline, no margin.\n- **PN-COMP3-003 (model1)** has the healthiest position: 28.7 days cover vs. 31-day lead time, still slightly short but closer.\n\nNone of these three have cover comfortably exceeding lead time, which is the actual signal for reordering here — not any risk score. If you're asking because comp3 risk looks elevated on a specific machine, note that comp3's model warning window is about 14 days, which is still shorter than two of these three lead times (31, 31) and about even with the third (15) — so a risk flag alone wouldn't have given enough runway to reorder PN-COMP3-001 or PN-COMP3-003 in time regardless.",
+  "tool_calls": [
+    {
+      "tool": "get_parts_position",
+      "arguments": {
+        "component": "comp3"
+      },
+      "status": "ok",
+      "error_code": null,
+      "truncated": false,
+      "duration_ms": 2.76,
+      "result": {
+        "status": "ok",
+        "data": {
+          "parts": [
+            {
+              "part_id": "PN-COMP3-001",
+              "component": "comp3",
+              "compatible_models": [
+                "model3"
+              ],
+              "stock_quantity": 5,
+              "unit_cost": 539.21,
+              "supplier_id": "SUP-002",
+              "lead_time_days": 31,
+              "observed_consumption_per_30d": 41.865,
+              "days_of_cover": 3.6
+            },
+            {
+              "part_id": "PN-COMP3-002",
+              "component": "comp3",
+              "compatible_models": [
+                "model2",
+                "model4"
+              ],
+              "stock_quantity": 21,
+              "unit_cost": 664.86,
+              "supplier_id": "SUP-005",
+              "lead_time_days": 15,
+              "observed_consumption_per_30d": 41.865,
+              "days_of_cover": 15.0
+            },
+            {
+              "part_id": "PN-COMP3-003",
+              "component": "comp3",
+              "compatible_models": [
+                "model1"
+              ],
+              "stock_quantity": 40,
+              "unit_cost": 1174.02,
+              "supplier_id": "SUP-004",
+              "lead_time_days": 31,
+              "observed_consumption_per_30d": 41.865,
+              "days_of_cover": 28.7
+            }
+          ],
+          "basis": "Stock on hand and consumption observed from the replacement log. No risk score or prediction is used: the model's effective warning is shorter than the lead time for 8 of 9 parts, so predictions cannot drive reordering. See docs/SIGNAL_ANALYSIS.md section 4."
+        },
+        "truncated": false
+      }
+    }
+  ],
+  "accounting": {
+    "run_id": "run_228256413c4e498e",
+    "scenario_id": "parts-position-comp3-01",
+    "seed": 1,
+    "trace_id": "00a312d9eb10d85930fa63aa03029bee",
+    "tokens_in": 895,
+    "tokens_out": 645,
+    "cache_read": 6434,
+    "cache_write": 0,
+    "estimated_cost_usd": 0.01429,
+    "wall_clock_ms": 3.142,
+    "model_ms": 0.0,
+    "tool_ms": 3.142,
+    "tool_calls": 1,
+    "tool_errors": 0,
+    "iterations": 2,
+    "max_iterations": 6,
+    "hit_iteration_limit": false,
+    "provider": "anthropic",
+    "model": "claude-sonnet-5"
+  },
+  "highlights": [],
+  "replayed": true
+}

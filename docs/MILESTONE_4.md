@@ -43,8 +43,16 @@ Model, age, and the set of components with their part numbers.
 
 **`get_failure_risk(machine_id, as_of)`**
 Per component: the **isotonic-calibrated** probability over the 14-day horizon, the
-bootstrap confidence interval, the cost-derived threshold in force, and a
-`warning_adequacy` field.
+cost-derived threshold in force, a `warning_adequacy` field, and the model's PR-AUC
+bootstrap interval as `model_prauc_ci_low` / `model_prauc_ci_high`.
+
+> **Corrected at Milestone 9.** This spec said "the bootstrap confidence
+> interval", and the implementation duly named the field
+> `confidence_interval_low/high`. The interval is the *model's* PR-AUC interval
+> for the component, not a predictive interval for the machine being queried —
+> on three of four components it does not bracket the probability it sits
+> beside. The spec's wording is what produced the misleading name, so it is
+> corrected here rather than only downstream.
 
 `warning_adequacy` is an enum — `sufficient` / `insufficient` / `marginal` —
 computed by comparing that component's measured effective detection lead against the

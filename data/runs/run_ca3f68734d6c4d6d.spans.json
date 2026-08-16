@@ -1,0 +1,134 @@
+[
+  {
+    "name": "model.call",
+    "trace_id": "e9fdce7faca9dcf9a166dea955396728",
+    "span_id": "6881892475c0efc2",
+    "parent_span_id": "db776ce9db9178b1",
+    "start_unix_nano": 1786908310739071700,
+    "end_unix_nano": 1786908310739071700,
+    "duration_ms": 0.0,
+    "status": "UNSET",
+    "attributes": {
+      "pdm.iteration": 1,
+      "gen_ai.usage.input_tokens": 188,
+      "gen_ai.usage.output_tokens": 588,
+      "pdm.cache_read_tokens": 3217,
+      "pdm.cache_write_tokens": 0,
+      "pdm.stop_reason": "replayed",
+      "pdm.wants_tools": true,
+      "pdm.tool_call_count": 4
+    }
+  },
+  {
+    "name": "tool.call",
+    "trace_id": "e9fdce7faca9dcf9a166dea955396728",
+    "span_id": "e7076704eb99de60",
+    "parent_span_id": "db776ce9db9178b1",
+    "start_unix_nano": 1786908310739071700,
+    "end_unix_nano": 1786908310741079500,
+    "duration_ms": 2.008,
+    "status": "UNSET",
+    "attributes": {
+      "pdm.tool": "get_machine_profile",
+      "pdm.arguments": "{\"machine_id\": 39}",
+      "pdm.iteration": 1,
+      "pdm.attempt": 1,
+      "pdm.result_type": "Success",
+      "pdm.truncated": false
+    }
+  },
+  {
+    "name": "tool.call",
+    "trace_id": "e9fdce7faca9dcf9a166dea955396728",
+    "span_id": "cbc94a73ec3528d7",
+    "parent_span_id": "db776ce9db9178b1",
+    "start_unix_nano": 1786908310741079500,
+    "end_unix_nano": 1786908310742078600,
+    "duration_ms": 0.999,
+    "status": "UNSET",
+    "attributes": {
+      "pdm.tool": "get_maintenance_history",
+      "pdm.arguments": "{\"machine_id\": 39, \"as_of\": \"2015-10-08T20:00:00\", \"component\": \"comp2\"}",
+      "pdm.iteration": 1,
+      "pdm.attempt": 1,
+      "pdm.result_type": "Success",
+      "pdm.truncated": false
+    }
+  },
+  {
+    "name": "tool.call",
+    "trace_id": "e9fdce7faca9dcf9a166dea955396728",
+    "span_id": "37636bf33ddf8c97",
+    "parent_span_id": "db776ce9db9178b1",
+    "start_unix_nano": 1786908310742078600,
+    "end_unix_nano": 1786908310743584300,
+    "duration_ms": 1.506,
+    "status": "UNSET",
+    "attributes": {
+      "pdm.tool": "get_recent_errors",
+      "pdm.arguments": "{\"machine_id\": 39, \"as_of\": \"2015-10-08T20:00:00\"}",
+      "pdm.iteration": 1,
+      "pdm.attempt": 1,
+      "pdm.result_type": "Success",
+      "pdm.truncated": false
+    }
+  },
+  {
+    "name": "tool.call",
+    "trace_id": "e9fdce7faca9dcf9a166dea955396728",
+    "span_id": "06a961368172af31",
+    "parent_span_id": "db776ce9db9178b1",
+    "start_unix_nano": 1786908310743584300,
+    "end_unix_nano": 1786908310748096500,
+    "duration_ms": 4.512,
+    "status": "UNSET",
+    "attributes": {
+      "pdm.tool": "get_failure_risk",
+      "pdm.arguments": "{\"machine_id\": 39, \"as_of\": \"2015-10-08T20:00:00\"}",
+      "pdm.iteration": 1,
+      "pdm.attempt": 1,
+      "pdm.result_type": "Success",
+      "pdm.truncated": false
+    }
+  },
+  {
+    "name": "model.call",
+    "trace_id": "e9fdce7faca9dcf9a166dea955396728",
+    "span_id": "182753f3117c7e4d",
+    "parent_span_id": "db776ce9db9178b1",
+    "start_unix_nano": 1786908310748096500,
+    "end_unix_nano": 1786908310748096500,
+    "duration_ms": 0.0,
+    "status": "UNSET",
+    "attributes": {
+      "pdm.iteration": 2,
+      "gen_ai.usage.input_tokens": 2679,
+      "gen_ai.usage.output_tokens": 855,
+      "pdm.cache_read_tokens": 3217,
+      "pdm.cache_write_tokens": 0,
+      "pdm.stop_reason": "replayed",
+      "pdm.wants_tools": false,
+      "pdm.tool_call_count": 0
+    }
+  },
+  {
+    "name": "agent.run",
+    "trace_id": "e9fdce7faca9dcf9a166dea955396728",
+    "span_id": "db776ce9db9178b1",
+    "parent_span_id": null,
+    "start_unix_nano": 1786908310739071700,
+    "end_unix_nano": 1786908310748096500,
+    "duration_ms": 9.025,
+    "status": "UNSET",
+    "attributes": {
+      "pdm.question": "What caused the comp2 problem on machine 39?",
+      "pdm.as_of": "2015-10-08T20:00:00",
+      "pdm.scenario_id": "unanswerable-root-cause-01",
+      "pdm.seed": 1,
+      "pdm.max_iterations": 6,
+      "pdm.iterations": 2,
+      "pdm.hit_iteration_limit": false,
+      "pdm.answer_chars": 1730
+    }
+  }
+]

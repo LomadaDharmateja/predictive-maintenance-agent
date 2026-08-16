@@ -42,6 +42,7 @@ class ScriptedClient:
 def client(built_db, tmp_path, monkeypatch):
     settings = api_config.Settings(
         provider="scripted", database=str(built_db), run_store=str(tmp_path / "runs"),
+        demo_mode=False,
     )
     monkeypatch.setattr(
         api_config.Settings, "build_client",
@@ -130,7 +131,8 @@ def test_a_malformed_request_is_422_not_200(client):
 
 def test_a_missing_database_is_a_500_with_a_typed_body(built_db, tmp_path):
     settings = api_config.Settings(
-        database=str(tmp_path / "absent.db"), run_store=str(tmp_path / "runs")
+        database=str(tmp_path / "absent.db"), run_store=str(tmp_path / "runs"),
+        demo_mode=False,
     )
     response = TestClient(create_app(settings)).post(
         "/v1/ask", json={"question": "How old is machine 14?"}
@@ -144,7 +146,7 @@ def test_a_missing_database_is_a_500_with_a_typed_body(built_db, tmp_path):
 def test_an_unknown_provider_is_a_503_not_a_traceback(built_db, tmp_path):
     settings = api_config.Settings(
         provider="not-a-provider", database=str(built_db),
-        run_store=str(tmp_path / "runs"),
+        run_store=str(tmp_path / "runs"), demo_mode=False,
     )
     response = TestClient(create_app(settings)).post(
         "/v1/ask", json={"question": "How old is machine 14?"}
@@ -190,7 +192,8 @@ def test_an_unreachable_provider_is_503_not_500(built_db, tmp_path, monkeypatch)
             raise ProviderError("connection refused")
 
     settings = api_config.Settings(
-        provider="ollama", database=str(built_db), run_store=str(tmp_path / "runs")
+        provider="ollama", database=str(built_db), run_store=str(tmp_path / "runs"),
+        demo_mode=False,
     )
     monkeypatch.setattr(api_config.Settings, "build_client", lambda self: Unreachable())
     response = TestClient(create_app(settings)).post(
@@ -303,7 +306,8 @@ def test_a_real_request_never_logs_the_question_or_the_answer(
 
     stream = io.StringIO()
     settings = api_config.Settings(
-        provider="scripted", database=str(built_db), run_store=str(tmp_path / "runs")
+        provider="scripted", database=str(built_db), run_store=str(tmp_path / "runs"),
+        demo_mode=False,
     )
     monkeypatch.setattr(
         api_config.Settings, "build_client",

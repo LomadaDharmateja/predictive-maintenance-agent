@@ -159,6 +159,14 @@ verify:
 investigate:
 	$(PYTHON) scripts/investigate_failure_maint_gap.py $(RAW)
 
+## serve: run the API and the demo page at http://127.0.0.1:8000/
+serve:
+	$(PYTHON) -m uvicorn src.api.app:app --host 127.0.0.1 --port 8000
+
+## demo-shots: regenerate the README screenshots (needs playwright + chromium)
+demo-shots:
+	$(PYTHON) -m scripts.capture_demo
+
 ## clean: remove build outputs, keeping data/raw
 clean:
 	rm -f $(DB) $(INVENTORY) $(MANIFEST)

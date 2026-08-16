@@ -228,11 +228,15 @@ def get_failure_risk(
                 ),
                 brier_skill_ci_low=round(quality["skill_ci_low"], 4),
                 brier_skill_ci_high=round(quality["skill_ci_high"], 4),
-                # The interval is the model's PR-AUC interval, not a per-row
-                # predictive interval. Named as such on the schema so it is not
-                # mistaken for uncertainty about this machine.
-                confidence_interval_low=round(max(0.0, interval[0]), 4),
-                confidence_interval_high=round(min(1.0, interval[1]), 4),
+                # The model's PR-AUC interval, not a per-row predictive
+                # interval. This comment used to claim the schema was "named as
+                # such"; it was not -- the field was `confidence_interval_*`,
+                # and the UI and two documents duly mistook it for uncertainty
+                # about the machine being queried. The name now carries the
+                # warning, because a comment beside an assignment does not
+                # travel with the field to its consumers.
+                model_prauc_ci_low=round(max(0.0, interval[0]), 4),
+                model_prauc_ci_high=round(min(1.0, interval[1]), 4),
                 threshold=threshold,
                 threshold_cost_ratio=float(
                     record["thresholds"]["10"]["cost_ratio"]

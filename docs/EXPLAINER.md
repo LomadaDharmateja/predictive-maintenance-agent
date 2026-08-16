@@ -17,7 +17,7 @@ The six tools:
 
 | Tool | Returns |
 |---|---|
-| `get_failure_risk` | A calibrated 14-day failure probability, its confidence interval, whether it is trustworthy, and whether the warning is long enough to act on |
+| `get_failure_risk` | A calibrated 14-day failure probability, whether it is trustworthy, whether the warning is long enough to act on, and the model's PR-AUC interval for that component — which describes the model, not this machine |
 | `get_parts_position` | Stock on hand, observed consumption rate, and how long stock would last |
 | `get_maintenance_history` | Past component replacements for a machine |
 | `get_recent_errors` | Non-fatal error codes in a recent window |
@@ -275,7 +275,7 @@ as a self-contained HTML trace.
 The service is FastAPI (`/v1/ask`, `/v1/runs/{id}`, `/health`) in a multi-stage
 container that runs as a non-root user with no compiler, no package installer,
 no secret and no database inside — verified by inspecting the built image rather
-than by trusting the Dockerfile. 519 tests run without network access.
+than by trusting the Dockerfile. 547 tests run without network access.
 
 ---
 
