@@ -34,7 +34,7 @@ FEATURE_SOURCES := src/features/config.py src/features/store.py \
         verify investigate clean distclean help fetch-data fetch-data-verify \
         worksheet eval eval-record eval-record-one eval-report eval-diff \
         eval-validate render horizon-sweep horizon-decision signal-analysis \
-        calibration-check
+        calibration-check trace-replay trace-view
 
 all: features
 
@@ -127,6 +127,15 @@ eval-report:
 ## eval-diff: compare two runs (make eval-diff BEFORE=... AFTER=...)
 eval-diff:
 	$(PYTHON) -m evals.diff $(BEFORE) $(AFTER)
+
+## trace-replay: replay a recorded run offline and check it reproduces exactly
+## make trace-replay RUN=20260815T224254Z-ea4d861
+trace-replay:
+	$(PYTHON) -m src.obs.replay $(RUN) --spans evals/results/$(RUN).spans.json --accounting evals/results/$(RUN).accounting.json
+
+## trace-view: build a self-contained offline HTML trace for one run
+trace-view:
+	$(PYTHON) -m src.obs.viewer $(RUN) --accounting evals/results/$(RUN).accounting.json
 
 ## case-study: reproduce the v1 leakage numbers from archive/v1-app/
 case-study:

@@ -55,7 +55,9 @@ PRIORITY = [
 
 def latest_run(directory: Path) -> tuple[Path, Path]:
     """The most recent results file and its traces sibling."""
-    runs = sorted(p for p in directory.glob("*.json") if not p.name.endswith(".traces.json"))
+    from evals.score_labels import run_results_files
+
+    runs = run_results_files(directory)
     if not runs:
         raise SystemExit(f"no results in {directory}; run `python -m evals.runner` first")
     results = runs[-1]

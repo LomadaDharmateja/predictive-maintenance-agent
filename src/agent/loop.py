@@ -35,6 +35,7 @@ from typing import Protocol
 from src.agent.contracts import ErrorCode, ToolError
 from src.agent import tools as tools_module
 from src.agent.tools import REGISTRY, serialise
+from src.obs import tracing
 
 PROMPT_PATH = Path(__file__).parent / "prompts" / "system_prompt.md"
 
@@ -210,7 +211,13 @@ class Agent:
         "question.\n"
     )
 
-    def run(self, question: str, as_of=None) -> AgentResult:
+    def run(
+        self,
+        question: str,
+        as_of=None,
+        scenario_id: str | None = None,
+        seed: int | None = None,
+    ) -> AgentResult:
         """Answer `question` as of `as_of`.
 
         `as_of` is not optional in practice, only in signature. Without it the
@@ -223,6 +230,12 @@ class Agent:
 
         database = self.database or db_module.DEFAULT_DB
         log = RunLog()
+        # `scenario_id` and `seed` are labels only -- the loop never behaves
+        # differently for them. They exist so a span can be found again.
+        self._run_span_labels = {
+            "pdm.scenario_id": scenario_id,
+            "pdm.seed": seed,
+        }
         system = self.system_prompt
         if as_of is not None:
             system += self.AS_OF_TEMPLATE.format(
@@ -235,6 +248,26 @@ class Agent:
         dropped_total = 0
         schemas = tool_schemas()
 
+        with tracing.span(
+            tracing.RUN,
+            **{
+                "pdm.question": question,
+                "pdm.as_of": as_of.isoformat() if hasattr(as_of, "isoformat") else as_of,
+                "pdm.scenario_id": scenario_id,
+                "pdm.seed": seed,
+                "pdm.max_iterations": self.config.max_iterations,
+            },
+        ) as run_span:
+            return self._iterate(
+                question, messages, schemas, database, log, dropped_total, run_span
+            )
+
+    def _iterate(
+        self, question, messages, schemas, database, log, dropped_total, run_span
+    ) -> AgentResult:
+        """The loop proper. Split out so the root span wraps the whole run
+        including the terminal branches, without indenting the original body
+        past readability."""
         for iteration in range(1, self.config.max_iterations + 1):
             messages, dropped = _trim(messages, self.config.max_history_messages)
             if dropped:
@@ -246,7 +279,25 @@ class Agent:
                 )
 
             started = time.perf_counter()
-            response = self.client.complete(messages, schemas)
+            with tracing.span(tracing.MODEL_CALL, **{"pdm.iteration": iteration}) as call_span:
+                response = self.client.complete(messages, schemas)
+                # Usage comes off the adapter rather than being counted here:
+                # the provider is the only thing that knows what it billed, and
+                # a locally re-tokenised estimate would be a second number that
+                # disagrees with the invoice.
+                usage = getattr(self.client, "last_exchange", None) or {}
+                tracing.set_attributes(
+                    call_span,
+                    **{
+                        "gen_ai.usage.input_tokens": usage.get("tokens_in"),
+                        "gen_ai.usage.output_tokens": usage.get("tokens_out"),
+                        "pdm.cache_read_tokens": usage.get("cache_read"),
+                        "pdm.cache_write_tokens": usage.get("cache_write"),
+                        "pdm.stop_reason": usage.get("stop_reason"),
+                        "pdm.wants_tools": response.wants_tools,
+                        "pdm.tool_call_count": len(response.tool_calls),
+                    },
+                )
             log.record(
                 iteration=iteration,
                 kind="model_call",
@@ -257,6 +308,14 @@ class Agent:
             )
 
             if not response.wants_tools:
+                tracing.set_attributes(
+                    run_span,
+                    **{
+                        "pdm.iterations": iteration,
+                        "pdm.hit_iteration_limit": False,
+                        "pdm.answer_chars": len(response.text or ""),
+                    },
+                )
                 return AgentResult(
                     answer=response.text or "",
                     iterations=iteration,
@@ -287,6 +346,13 @@ class Agent:
                 )
 
         # Terminal behaviour on exhaustion is defined, and it is not silence.
+        tracing.set_attributes(
+            run_span,
+            **{
+                "pdm.iterations": self.config.max_iterations,
+                "pdm.hit_iteration_limit": True,
+            },
+        )
         log.record(
             iteration=self.config.max_iterations,
             kind="iteration_limit",
@@ -309,13 +375,30 @@ class Agent:
         attempts = 0
         while True:
             started = time.perf_counter()
-            # Resolved through the module on every call, never bound at import.
-            # A module-level `from ... import dispatch` captures the original
-            # function object, so anything that wraps `tools.dispatch` -- the
-            # eval harness's failure injection, and its validation-window guard
-            # -- is silently bypassed. Both were, until a pilot run showed a
-            # `tool_failure` scenario receiving a successful tool result.
-            result = tools_module.dispatch(call.name, call.arguments, database)
+            # Resolved through the module on every call, never bound at import;
+            # see the note that used to live here, now in the dispatch call.
+            with tracing.span(
+                tracing.TOOL_CALL,
+                **{
+                    "pdm.tool": call.name,
+                    "pdm.arguments": call.arguments,
+                    "pdm.iteration": iteration,
+                    "pdm.attempt": attempts + 1,
+                },
+            ) as tool_span:
+                result = tools_module.dispatch(call.name, call.arguments, database)
+                # The discriminated union is the interesting attribute: a
+                # `ToolError` that read as a success is the v1 defect this
+                # project was rebuilt to prevent, and a trace that did not
+                # distinguish them would hide it again.
+                tracing.set_attributes(
+                    tool_span,
+                    **{
+                        "pdm.result_type": type(result).__name__,
+                        "pdm.error_code": getattr(getattr(result, "code", None), "value", None),
+                        "pdm.truncated": bool(getattr(result, "truncated", False)),
+                    },
+                )
             elapsed = round((time.perf_counter() - started) * 1000, 2)
 
             if isinstance(result, ToolError):

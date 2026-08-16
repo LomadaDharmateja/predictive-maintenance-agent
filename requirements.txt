@@ -45,5 +45,11 @@ anthropic==0.122.0
 # dependency. Pinned here because src/agent/providers.py imports it by name.
 httpx==0.28.1
 
+# Observability. Milestone 6: one span per run, children per tool and model
+# call. No exporter here opens a socket -- src/obs/tracing.py ships a JSON-lines
+# file exporter and an in-memory one, and the test suite must run with no
+# network. An OTLP exporter is deliberately not a dependency.
+opentelemetry-sdk==1.44.0
+
 # Test
 pytest==9.1.1

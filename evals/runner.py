@@ -44,6 +44,7 @@ from evals.transcript import (
 from src.agent.contracts import ErrorCode, ToolError
 from src.agent.loop import Agent, LLMResponse, LoopConfig, ToolCall
 from src.agent.providers import ModelIdentity
+from src.obs import accounting, tracing
 
 HARNESS_VERSION = "1.1.0"
 
@@ -61,34 +62,9 @@ DEFAULT_SEEDS = (1, 2, 3)
 #: which this harness did until transcripts carried a provider -- reports a
 #: cost that was never incurred, and the cost column exists to inform a
 #: decision about what a real run would cost.
-#: Keyed by model where the model is known, because a tier's prices differ by
-#: 5x and a run priced at the wrong tier answers the wrong budgeting question.
-#: Standard list prices; any introductory discount is deliberately not encoded,
-#: so the figure is the one that survives the promotion ending.
-PRICES_PER_1K = {
-    "claude-opus-5": (0.005, 0.025),
-    "claude-opus-4-8": (0.005, 0.025),
-    "claude-sonnet-5": (0.003, 0.015),
-    "claude-sonnet-4-6": (0.003, 0.015),
-    "claude-haiku-4-5": (0.001, 0.005),
-}
-PROVIDER_PRICES_PER_1K = {
-    "ollama": (0.0, 0.0),  # zero because it is zero
-}
-DEFAULT_PRICE = (0.003, 0.015)
-
-#: What a cached input token costs relative to an uncached one.
-CACHE_READ_MULTIPLIER = 0.1
-CACHE_WRITE_MULTIPLIER = 1.25
-
-
-def price_for(identity) -> tuple[float, float]:
-    if identity.provider in PROVIDER_PRICES_PER_1K:
-        return PROVIDER_PRICES_PER_1K[identity.provider]
-    for model, price in PRICES_PER_1K.items():
-        if identity.model.startswith(model):
-            return price
-    return DEFAULT_PRICE
+# Pricing and per-run accounting live in `src/obs/accounting.py`. Milestone 6
+# item 5: the harness reads a cost rather than working one out, so there is one
+# source of truth for what a token costs.
 
 
 class ReplayClient:
@@ -108,6 +84,7 @@ class ReplayClient:
         self.tokens_out = 0
         self.cache_read = 0
         self.cache_write = 0
+        self.last_exchange: dict = {}
 
     def complete(self, messages, tools) -> LLMResponse:
         if self.index >= len(self.turns):
@@ -125,6 +102,17 @@ class ReplayClient:
         self.cache_read += int(turn.get("cache_read", 0))
         self.cache_write += int(turn.get("cache_write", 0))
 
+        # The same shape a live adapter exposes, so the tracing layer reads
+        # usage identically whether the turn came from a provider or from
+        # disk. Without it a replayed run traces with zero tokens and the
+        # accounting rebuilt from those spans reports a free run.
+        self.last_exchange = {
+            "tokens_in": int(turn.get("tokens_in", 0)),
+            "tokens_out": int(turn.get("tokens_out", 0)),
+            "cache_read": int(turn.get("cache_read", 0)),
+            "cache_write": int(turn.get("cache_write", 0)),
+            "stop_reason": "replayed",
+        }
         if turn.get("tool_calls"):
             return LLMResponse(
                 tool_calls=tuple(
@@ -206,7 +194,10 @@ def run_scenario(
     tools_module.dispatch = window_guarded(_inject(scenario, database))
     started = time.perf_counter()
     try:
-        outcome = agent.run(scenario.question, as_of=scenario.as_of)
+        outcome = agent.run(
+            scenario.question, as_of=scenario.as_of,
+            scenario_id=scenario.id, seed=seed,
+        )
     finally:
         tools_module.dispatch = original
     elapsed = (time.perf_counter() - started) * 1000
@@ -226,16 +217,9 @@ def run_scenario(
     ]
 
     identity = identity_of(transcript)
-    price_in, price_out = price_for(identity)
-    # Cached tokens are not `tokens_in` -- the provider reports them in their
-    # own fields and bills them at ~0.1x for a read and ~1.25x for a write.
-    # Charging them at the input rate would report a saving that was made as
-    # if it had not been.
-    cost = (
-        client.tokens_in / 1000 * price_in
-        + client.cache_read / 1000 * price_in * CACHE_READ_MULTIPLIER
-        + client.cache_write / 1000 * price_in * CACHE_WRITE_MULTIPLIER
-        + client.tokens_out / 1000 * price_out
+    cost = accounting.cost_usd(
+        identity, client.tokens_in, client.tokens_out,
+        client.cache_read, client.cache_write,
     )
     trace = ScenarioTrace(
         scenario_id=scenario.id,

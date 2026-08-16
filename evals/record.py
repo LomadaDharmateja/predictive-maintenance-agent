@@ -151,7 +151,10 @@ def record_scenario(
     original = tools_module.dispatch
     tools_module.dispatch = window_guarded(_inject(scenario, database, original))
     try:
-        agent.run(scenario.question, as_of=scenario.as_of)
+        agent.run(
+            scenario.question, as_of=scenario.as_of,
+            scenario_id=scenario.id, seed=seed,
+        )
     finally:
         tools_module.dispatch = original
 

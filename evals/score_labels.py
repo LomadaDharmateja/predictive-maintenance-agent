@@ -81,8 +81,15 @@ def parse_sheet(text: str) -> list[tuple[str, str, bool | None]]:
     return rows
 
 
+def run_results_files(directory: Path) -> list[Path]:
+    """A run's primary results file is `<run_id>.json`; its sidecars
+    (`.traces.json`, `.accounting.json`, `.spans.json`) share the run id and
+    carry a second suffix, so a dot in the stem is what tells them apart."""
+    return sorted(p for p in directory.glob("*.json") if "." not in p.stem)
+
+
 def latest_run(directory: Path) -> tuple[dict, dict]:
-    runs = sorted(p for p in directory.glob("*.json") if not p.name.endswith(".traces.json"))
+    runs = run_results_files(directory)
     if not runs:
         raise SystemExit(f"no results in {directory}")
     results = json.loads(runs[-1].read_text(encoding="utf-8"))
@@ -346,9 +353,7 @@ def main() -> None:
     print(render(agreement, detail))
 
     if args.write_into_results:
-        runs = sorted(
-            p for p in args.results.glob("*.json") if not p.name.endswith(".traces.json")
-        )
+        runs = run_results_files(args.results)
         path = runs[-1]
         payload = json.loads(path.read_text(encoding="utf-8"))
         payload["judge_agreement"] = json.loads(agreement.model_dump_json())
