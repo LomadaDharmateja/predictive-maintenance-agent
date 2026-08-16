@@ -21,6 +21,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from tests.artefacts import requires_features
+
 from src.eval.datasets import (
     LOCKED_SPLIT,
     TEST_SPLIT_UNLOCK,
@@ -143,6 +145,7 @@ def test_the_wrong_token_does_not_open_it():
         load_features(LOCKED_SPLIT, unlock="please")
 
 
+@requires_features
 def test_train_and_val_need_no_token(tmp_path):
     """The lock must not be so blunt that ordinary work needs the key."""
     for loader in (load_train, load_val):
@@ -151,6 +154,7 @@ def test_train_and_val_need_no_token(tmp_path):
         assert len(frame) > 0
 
 
+@requires_features
 def test_the_token_does_open_it():
     """Anti-vacuity: if the token did not work, the guard tests above would pass
     for the wrong reason and the authorised module would be broken.

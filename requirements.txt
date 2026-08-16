@@ -4,7 +4,17 @@
 #
 # Data and feature layers
 numpy==2.5.1
-pandas==3.0.5
+# Pinned to the version the suite is actually verified against.
+#
+# This was `pandas==3.0.5` and that pin never resolved: mlflow 3.15.1 requires
+# `pandas<3`, so `pip install -r requirements.txt` failed outright with
+# ResolutionImpossible, CI never reached pytest, and the job surfaced as a
+# missing report.xml. It went unnoticed locally because this venv was built
+# incrementally and has been running 2.3.3 the whole time -- the pinned 3.0.5
+# was never installed anywhere. A note in requirements-api.txt claimed "the
+# 3.0.5 the feature layer needs"; the feature layer does not need it, and all
+# 547 tests pass on 2.3.3.
+pandas==2.3.3
 pandera==0.32.1
 
 # Parquet engine for pandas.to_parquet / read_parquet in src/features/build.py.
@@ -15,6 +25,10 @@ pyarrow==25.0.0
 # Modelling and evaluation
 scikit-learn==1.9.0
 lightgbm==4.7.0
+# Not imported by name anywhere in this repository. Pinned because
+# scikit-learn and lightgbm both require it and the determinism rule means the
+# numerical stack must be a fixed set rather than whatever a resolver picks on
+# the day. `tests/test_requirements.py` carries it as a documented exception.
 scipy==1.18.0
 joblib==1.5.3
 
@@ -50,6 +64,19 @@ httpx==0.28.1
 # file exporter and an in-memory one, and the test suite must run with no
 # network. An OTLP exporter is deliberately not a dependency.
 opentelemetry-sdk==1.44.0
+
+# Service layer. Imported directly by src/api/ and exercised by tests/test_api.py
+# and tests/test_demo_ui.py, so the test set needs them and not only the image.
+#
+# All three previously arrived transitively -- fastapi and pydantic via mlflow
+# and pandera, PyYAML via starlette. The suite passed on dependencies nothing
+# declared, so dropping mlflow would have broken the API tests for no visible
+# reason. `tests/test_requirements.py` now fails the build on any such gap.
+fastapi==0.141.1
+pydantic==2.13.1
+
+# Scenario definitions in evals/scenarios.yaml, read by evals/runner.py.
+PyYAML==6.0.3
 
 # Test
 pytest==9.1.1

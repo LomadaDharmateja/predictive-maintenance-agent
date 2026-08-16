@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.artefacts import requires_recorded_run
+
 from evals import diff as diff_module
 from evals.record import RecordingClient, record_suite
 from evals.transcript import (
@@ -1572,6 +1574,7 @@ def test_the_label_sheet_carries_none_of_the_judge_s_verdicts():
             assert reason[:40] not in body, "a judge reason leaked into the sheet"
 
 
+@requires_recorded_run
 def test_a_freshly_generated_sheet_is_blank(tmp_path):
     """Generated into a scratch path, because the checked-in sheet is filled in
     -- that is the point of it."""
@@ -1585,6 +1588,7 @@ def test_a_freshly_generated_sheet_is_blank(tmp_path):
     assert all(v is None for _, _, v in rows), "a fresh sheet must be unfilled"
 
 
+@requires_recorded_run
 def test_the_sheet_covers_exactly_the_judged_assertions_at_seed_one():
     from evals.score_labels import latest_run, parse_sheet
 

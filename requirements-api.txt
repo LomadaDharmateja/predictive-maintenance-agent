@@ -4,9 +4,14 @@
 # matplotlib, kaggle and lightgbm, none of which the service imports. Two
 # reasons to split rather than reuse it:
 #
-#   1. mlflow 3.15 pins a pandas older than the 3.0.5 the feature layer needs,
-#      so `pip install -r requirements.txt` cannot resolve on a clean image at
-#      all. It works locally only because the venv was built incrementally.
+#   1. mlflow drags in a training and tracking stack the service never calls.
+#
+#      This note previously said mlflow "pins a pandas older than the 3.0.5 the
+#      feature layer needs". That was wrong twice over: the feature layer does
+#      not need pandas 3 (the whole suite passes on 2.3.3), and the conclusion
+#      drawn from it -- leaving requirements.txt pinned at an unresolvable
+#      3.0.5 and routing around it here -- is what broke CI. Both files now pin
+#      the same verified version.
 #   2. Every package in a running container is attack surface. The service
 #      needs to answer questions, not to train models or plot curves.
 #
@@ -26,9 +31,14 @@ pydantic==2.13.1
 # tool loads these at request time, which is why the health check exercises the
 # load rather than stat-ing the file.
 numpy==2.5.1
-pandas==3.0.5
+pandas==2.3.3
 scikit-learn==1.9.0
 joblib==1.5.3
+
+# Scenario definitions. Demo mode is the service's default, and it reads
+# evals/scenarios.yaml through evals/runner.py. Arrived transitively via
+# starlette until Milestone 9.
+PyYAML==6.0.3
 
 # Model providers. The Anthropic SDK resolves ANTHROPIC_API_KEY itself; no code
 # in this repository reads the value.

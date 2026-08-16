@@ -14,17 +14,40 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
           cache: pip
 
       - name: Install dependencies
         run: |
+          set -euo pipefail
           python -m pip install --upgrade pip
+          # `pip check` after the install, because a broken dependency set is
+          # not always a hard resolver failure and the symptom surfaces far
+          # from the cause. requirements.txt once pinned pandas==3.0.5 against
+          # mlflow's pandas<3: the install died here, pytest never ran, and
+          # the only visible message was the artifact step reporting a missing
+          # report.xml two steps later.
           pip install -r requirements.txt
+          pip check
+
+      # Collection is its own step so that an ImportError in a test module is
+      # reported as "no module named X" here, rather than as an absent
+      # report.xml at the end of the job. Nothing is executed in this step.
+      - name: Collect tests (fail by name, not by missing artifact)
+        run: |
+          set -euo pipefail
+          if ! pytest --collect-only -q > collect.log 2>&1; then
+            echo "::error title=pytest collection failed::could not import the test suite"
+            echo "--- collection output ---"
+            cat collect.log
+            grep -E "ModuleNotFoundError|ImportError|^E " collect.log | head -20 >&2 || true
+            exit 1
+          fi
+          tail -3 collect.log
 
       # data/raw/ is gitignored and is not fetched here: fetching needs a Kaggle
       # credential, and this workflow deliberately has access to no secrets. The
@@ -42,9 +65,22 @@ jobs:
           MIN_EXECUTED: '60'
         run: |
           python - <<'PY'
-          import os, sys, xml.etree.ElementTree as ET
+          import os, pathlib, sys, xml.etree.ElementTree as ET
 
           minimum = int(os.environ["MIN_EXECUTED"])
+          if not pathlib.Path("report.xml").exists():
+              # pytest exited without writing a report at all -- a usage error
+              # or a conftest that failed to import. Said plainly here, because
+              # the next step's "no files were found with the provided path"
+              # describes the symptom and hides the cause.
+              print(
+                  "FAIL: pytest produced no report.xml, so it exited before "
+                  "running any test. This is a collection or configuration "
+                  "failure, not a failing test -- read the 'Collect tests' "
+                  "step above for the module that could not be imported.",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
           root = ET.parse("report.xml").getroot()
           suite = root if root.tag == "testsuite" else root.find("testsuite")
 
@@ -78,7 +114,7 @@ jobs:
 
       - name: Upload test report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: pytest-report
           path: report.xml
@@ -97,7 +133,7 @@ jobs:
     needs: pytest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Build the image
         run: docker build -t industrial-ai-agent:ci .
@@ -162,17 +198,19 @@ jobs:
     needs: pytest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
           cache: pip
 
       - name: Install dependencies
         run: |
+          set -euo pipefail
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip check
 
       - name: Replay the most recent recorded run
         env:
