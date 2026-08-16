@@ -29,6 +29,7 @@ from evals.transcript import (
 )
 from evals.judge import KAPPA_FLOOR, Judge, calibrate, load_prompt, prompt_version
 from evals.metrics import (
+    derived_figures,
     _states_limitation,
     check_assertions,
     check_grounding,
@@ -198,6 +199,293 @@ def test_a_fabricated_figure_is_detected_and_listed():
     assert not grounded
     assert [h.value for h in found] == ["87"]
     assert "on order" in found[0].context
+
+
+# ----------------------------------------------------------------------
+# Grounding: unit suffixes, and arithmetic over grounded values
+#
+# All three of these were verified by hand against a pilot run before being
+# pinned here. Without the pins a future edit re-breaks them silently.
+# ----------------------------------------------------------------------
+
+
+#: The real comp3 rows `get_parts_position` returns, so the suffix forms below
+#: are checked against the values a model actually sees rather than a fixture
+#: invented to pass.
+COMP3_PARTS = {
+    "parts": [
+        {"part_id": "PN-COMP3-001", "stock_quantity": 5, "lead_time_days": 31,
+         "days_of_cover": 3.6},
+        {"part_id": "PN-COMP3-002", "stock_quantity": 21, "lead_time_days": 15,
+         "days_of_cover": 15.0},
+        {"part_id": "PN-COMP3-003", "stock_quantity": 40, "lead_time_days": 31,
+         "days_of_cover": 28.7},
+    ]
+}
+
+
+def _parts_trace(answer: str) -> ScenarioTrace:
+    return make_trace(
+        answer=answer,
+        tool_calls=[
+            ToolCallTrace(
+                tool="get_parts_position", arguments={"component": "comp3"},
+                status="ok", duration_ms=1.0,
+                result_json=json.dumps(COMP3_PARTS),
+            )
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    "written",
+    [
+        # Every form below is how a hosted model actually rendered a value that
+        # `get_parts_position` returned in the pilot.
+        "PN-COMP3-003 has 28.7d of cover",
+        "PN-COMP3-002 cover is 15d against a 15-day lead",
+        "PN-COMP3-001 carries a 31d lead time",
+        "cover is 28.7 days",
+        "cover runs to 15days",
+        "PN-COMP3-003 holds 40 units, 28.7d of cover, 31d lead",
+    ],
+)
+def test_a_unit_suffixed_figure_is_recognised_as_quoted_not_fabricated(written):
+    """The regression: "28.7d" tokenised to a bare "28" that matched nothing,
+    so the harness reported a fabrication against an answer quoting the tool."""
+    scenario = Scenario(
+        id="scn-1", category=Category.PARTS_POSITION,
+        question="what is the stock position?",
+    )
+    trace = _parts_trace(written)
+    grounded, found = check_grounding(scenario, trace)
+    assert grounded, f"{written!r} should be grounded; flagged {[h.value for h in found]}"
+
+
+def test_the_detection_lead_reads_the_same_in_hours_and_days():
+    """335h is quoted directly; 14 days is the same figure converted."""
+    scenario = Scenario(
+        id="scn-1", category=Category.RISK_INADEQUATE,
+        question="should I order a comp2 replacement for machine 1?",
+    )
+    trace = make_trace(
+        answer="the measured detection lead is 335h, about 13.96 days",
+        tool_calls=[
+            ToolCallTrace(
+                tool="get_failure_risk", arguments={"machine_id": 1},
+                status="ok", duration_ms=1.0,
+                result_json=json.dumps({"detection_lead_hours": 335.0}),
+            )
+        ],
+    )
+    grounded, found = check_grounding(scenario, trace)
+    assert grounded, f"flagged {[h.value for h in found]}"
+    assert "13.96" in derived_figures(scenario, trace)
+
+
+def test_a_unit_suffixed_figure_that_no_tool_returned_is_still_flagged():
+    """Anti-vacuity for the suffix fix: consuming the suffix must not make
+    every suffixed number grounded."""
+    scenario = Scenario(
+        id="scn-1", category=Category.PARTS_POSITION,
+        question="what is the stock position?",
+    )
+    grounded, found = check_grounding(scenario, _parts_trace("cover is 412.9d"))
+    assert not grounded
+    assert [h.value for h in found] == ["412.9"]
+
+
+def _history_trace(answer: str) -> ScenarioTrace:
+    """The pilot's real comp2 replacement log for machine 39.
+
+    Consecutive gaps are 79, 45, 15, 15, 30, 15, 15 and 75 days.
+    """
+    dates = ["2014-11-28", "2015-02-15", "2015-04-01", "2015-04-16", "2015-05-01",
+             "2015-05-31", "2015-06-15", "2015-06-30", "2015-09-13"]
+    return make_trace(
+        answer=answer,
+        tool_calls=[
+            ToolCallTrace(
+                tool="get_maintenance_history", arguments={"machine_id": 39},
+                status="ok", duration_ms=1.0,
+                result_json=json.dumps({
+                    "records": [
+                        {"machine_id": 39, "component": "comp2",
+                         "replaced_at": f"{d}T06:00:00"} for d in dates
+                    ]
+                }),
+            )
+        ],
+    )
+
+
+HISTORY_SCENARIO = dict(
+    id="scn-1", category=Category.UNANSWERABLE,
+    question="what caused the comp2 problem on machine 39?",
+)
+
+
+@pytest.mark.parametrize("interval", ["15", "45", "79", "75"])
+def test_a_real_replacement_interval_is_admitted_as_derived(interval):
+    """Arithmetic over two grounded dates is grounded."""
+    scenario = Scenario(**HISTORY_SCENARIO)
+    trace = _history_trace(f"replacements came {interval} days apart")
+    grounded, found = check_grounding(scenario, trace)
+    assert grounded, f"{interval} is a real interval; flagged {[h.value for h in found]}"
+    assert interval in derived_figures(scenario, trace), (
+        "and it must be reported as derived, not as directly quoted"
+    )
+
+
+def test_a_figure_that_is_not_an_interval_is_still_flagged():
+    """The discrimination pin. The agent wrote "~15-16 day intervals": 15 is a
+    real gap, 16 is not any gap between two replacement dates -- it was a hedge
+    invented around a real number. Admitting derivation must not admit that."""
+    scenario = Scenario(**HISTORY_SCENARIO)
+    trace = _history_trace("several ~15-16 day intervals")
+    grounded, found = check_grounding(scenario, trace)
+    assert not grounded
+    assert [h.value for h in found] == ["16"]
+    assert "15" in derived_figures(scenario, trace)
+
+
+def test_derived_matching_does_not_admit_a_percentage_scaled_coincidence():
+    """Regression on the looser matcher. A stock of 21 converts to 0.875 days;
+    scaled by 100 that is 87.5, which sits inside the 2% tolerance band around a
+    fabricated "87". Derived candidates therefore get exact-or-rounded matching
+    only -- no percentage form, no tolerance."""
+    scenario = Scenario(
+        id="scn-1", category=Category.PARTS_POSITION,
+        question="what is the stock position?",
+    )
+    trace = make_trace(answer="Stock is 21 units and 87 are on order.")
+    grounded, found = check_grounding(scenario, trace)
+    assert not grounded
+    assert [h.value for h in found] == ["87"]
+    assert "87" not in derived_figures(scenario, trace)
+
+
+def test_the_prediction_time_the_harness_supplied_is_not_a_fabrication():
+    """`as_of` is written into the system prompt by the harness. An answer
+    echoing it is quoting its own instructions -- and in a `tool_failure`
+    scenario there are no successful tool results for it to trace to."""
+    scenario = Scenario(
+        id="tf-1", category=Category.TOOL_FAILURE,
+        question="What's the comp2 risk on machine 1 right now?",
+        as_of=datetime(2015, 10, 16, 6, 0, 0),
+    )
+    trace = make_trace(
+        answer="The call failed, so I have no risk score as of 2015-10-16 06:00.",
+        tool_calls=[
+            ToolCallTrace(
+                tool="get_failure_risk", arguments={"machine_id": 1},
+                status="error", error_code="timeout", duration_ms=1.0,
+                result_json=json.dumps({"status": "error", "message": "injected failure"}),
+            )
+        ],
+    )
+    grounded, found = check_grounding(scenario, trace)
+    assert grounded, f"flagged {[h.value for h in found]}"
+
+
+def test_a_machine_id_from_the_question_is_not_a_fabrication():
+    scenario = Scenario(
+        id="scn-1", category=Category.RISK_INADEQUATE,
+        question="Machine 30 - should I order a comp1 replacement?",
+        as_of=datetime(2015, 10, 14, 13, 0, 0),
+    )
+    trace = make_trace(answer="For machine 30 I would not order a comp1 part.")
+    grounded, _ = check_grounding(scenario, trace)
+    assert grounded
+
+
+def test_harness_supplied_grounding_does_not_ground_everything():
+    """Anti-vacuity: the two supplied sources are narrow, not a blanket pass."""
+    scenario = Scenario(
+        id="tf-1", category=Category.TOOL_FAILURE,
+        question="What's the comp2 risk on machine 1 right now?",
+        as_of=datetime(2015, 10, 16, 6, 0, 0),
+    )
+    trace = make_trace(
+        answer="The call failed, but comp2 risk is about 0.83.",
+        tool_calls=[
+            ToolCallTrace(
+                tool="get_failure_risk", arguments={"machine_id": 1},
+                status="error", error_code="timeout", duration_ms=1.0,
+                result_json=json.dumps({"status": "error"}),
+            )
+        ],
+    )
+    grounded, found = check_grounding(scenario, trace)
+    assert not grounded
+    assert [h.value for h in found] == ["0.83"]
+
+
+# ----------------------------------------------------------------------
+# The percentage-scaling looseness
+# ----------------------------------------------------------------------
+
+
+def test_a_part_id_does_not_ground_a_figure_near_one_hundred():
+    """Regression. `PN-COMP3-001` tokenised to `1.0`, and `1.0 x 100` grounded
+    anything in 98-102 -- so any trace touching get_parts_position vouched for
+    a fabricated "100 units on order"."""
+    scenario = Scenario(
+        id="scn-1", category=Category.PARTS_POSITION,
+        question="what is the stock position?",
+    )
+    # 100 is excluded: it is in DOMAIN_CONSTANTS and never checked either way.
+    for invented in ("99", "101", "98.5"):
+        trace = _parts_trace(f"There are {invented} units on order.")
+        grounded, found = check_grounding(scenario, trace)
+        assert not grounded, f"{invented} should not be grounded by a part id"
+        assert invented in [h.value for h in found]
+
+
+def test_a_stock_level_does_not_ground_its_hundredfold():
+    scenario = Scenario(
+        id="scn-1", category=Category.PARTS_POSITION,
+        question="what is the stock position?",
+    )
+    # stock_quantity 21 must not vouch for 2100.
+    grounded, found = check_grounding(scenario, make_trace(answer="2100 on order."))
+    assert not grounded
+    assert [h.value for h in found] == ["2100"]
+
+
+def test_a_probability_still_renders_as_a_percentage():
+    """Anti-vacuity for the fix above: the percentage form must survive where a
+    percentage actually makes sense."""
+    scenario = Scenario(
+        id="scn-1", category=Category.RISK_ADEQUATE, question="what is the risk?"
+    )
+    trace = make_trace(
+        answer="comp2 is at 26.2%",
+        tool_calls=[
+            ToolCallTrace(
+                tool="get_failure_risk", arguments={"machine_id": 1},
+                status="ok", duration_ms=1.0,
+                result_json=json.dumps({"calibrated_probability": 0.262}),
+            )
+        ],
+    )
+    grounded, found = check_grounding(scenario, trace)
+    assert grounded, f"flagged {[h.value for h in found]}"
+
+
+def test_the_derivation_set_stays_small_enough_to_discriminate():
+    """If the candidate set ever balloons, the check has stopped testing
+    anything and must be revisited rather than quietly widened."""
+    from evals.metrics import (
+        MAX_DERIVED_CANDIDATES,
+        _candidate_values,
+        _derived_candidates,
+        _timestamps_in,
+    )
+
+    trace = _history_trace("an answer")
+    candidates = _derived_candidates(_candidate_values(trace), _timestamps_in(trace))
+    assert len(candidates) < MAX_DERIVED_CANDIDATES
 
 
 def test_a_percentage_rendering_of_a_probability_counts_as_grounded():
@@ -380,6 +668,209 @@ def test_kappa_is_undefined_when_both_raters_are_constant():
     assert cohens_kappa([True] * 5, [True] * 5) != cohens_kappa([True] * 5, [True] * 5)
 
 
+# ----------------------------------------------------------------------
+# The judge: recorded verdicts, and a miss that raises rather than passes
+# ----------------------------------------------------------------------
+
+
+class StubJudgeClient:
+    def __init__(self, reply: str = '{"holds": true, "confidence": 0.9, "reason": "x"}'):
+        from src.agent.providers import ModelIdentity
+
+        self.reply = reply
+        self.calls = 0
+        self.identity = ModelIdentity(
+            provider="stub", model="judge", version="1",
+            temperature=0.0, seed=None, max_tokens=512,
+        )
+
+    def complete(self, prompt: str) -> str:
+        self.calls += 1
+        return self.reply
+
+
+def test_a_verdict_is_recorded_once_and_replayed_thereafter(tmp_path):
+    from evals.judge import Judge, VerdictCache
+
+    cache = VerdictCache(tmp_path / "v.json")
+    client = StubJudgeClient()
+    judge = Judge(client=client, cache=cache)
+
+    first = judge.assess("risk_commentary", "an answer")
+    second = judge.assess("risk_commentary", "an answer")
+    assert first == second
+    assert client.calls == 1, "the second call must come from the cache"
+
+    cache.save(client.identity)
+    replayed = Judge(
+        client=None, cache=VerdictCache(tmp_path / "v.json"), model_key="stub/judge"
+    )
+    assert replayed.assess("risk_commentary", "an answer").holds is True
+
+
+def test_a_verdict_from_one_judge_model_is_not_served_for_another(tmp_path):
+    """Switching judge from Sonnet to Haiku must not replay Sonnet's grades
+    under Haiku's name. That is the same attribution failure `RunMetadata.model`
+    exists to prevent, one level down."""
+    from evals.judge import Judge, JudgementMissing, VerdictCache
+
+    path = tmp_path / "v.json"
+    sonnet = StubJudgeClient('{"holds": true, "confidence": 0.9, "reason": "x"}')
+    recorded = Judge(client=sonnet, cache=VerdictCache(path),
+                     model_key="anthropic/claude-sonnet-5")
+    recorded.assess("risk_commentary", "an answer")
+    recorded.cache.save(sonnet.identity)
+
+    # Same rubric, same assertion, same answer -- different judge.
+    haiku = Judge(client=None, cache=VerdictCache(path),
+                  model_key="anthropic/claude-haiku-4-5")
+    with pytest.raises(JudgementMissing) as raised:
+        haiku.assess("risk_commentary", "an answer")
+    assert "claude-haiku-4-5" in str(raised.value)
+    assert "anthropic/claude-sonnet-5" in str(raised.value), (
+        "the miss must name which judges do have verdicts"
+    )
+
+    # Anti-vacuity: the original judge still reads its own verdict.
+    again = Judge(client=None, cache=VerdictCache(path),
+                  model_key="anthropic/claude-sonnet-5")
+    assert again.assess("risk_commentary", "an answer").holds is True
+
+
+def test_an_offline_judge_with_no_model_named_reads_nobody_elses_verdicts(tmp_path):
+    from evals.judge import Judge, JudgementMissing, VerdictCache
+
+    path = tmp_path / "v.json"
+    client = StubJudgeClient()
+    Judge(client=client, cache=(c := VerdictCache(path)),
+          model_key="anthropic/claude-sonnet-5").assess("a", "answer")
+    c.save(client.identity)
+
+    with pytest.raises(JudgementMissing, match="unspecified"):
+        Judge(client=None, cache=VerdictCache(path)).assess("a", "answer")
+
+
+def test_an_ungraded_assertion_raises_rather_than_passing(tmp_path):
+    """The judge equivalent of a missing transcript."""
+    from evals.judge import Judge, JudgementMissing, VerdictCache
+
+    judge = Judge(client=None, cache=VerdictCache(tmp_path / "v.json"))
+    with pytest.raises(JudgementMissing, match="no recorded verdict"):
+        judge.assess("risk_commentary", "an answer")
+
+
+def test_revising_the_rubric_invalidates_every_verdict_it_produced(tmp_path):
+    """Section 3 requires before and after; surviving verdicts make that impossible."""
+    from evals.judge import VerdictCache
+
+    cache = VerdictCache(tmp_path / "v.json")
+    old = cache.key("1.0.0", "stub/judge", "risk_commentary", "an answer")
+    new = cache.key("1.1.0", "stub/judge", "risk_commentary", "an answer")
+    assert old != new
+    # And the judge model is part of the key for the same reason.
+    other = cache.key("1.0.0", "stub/other", "risk_commentary", "an answer")
+    assert other != old
+
+
+def test_a_different_answer_gets_its_own_verdict(tmp_path):
+    from evals.judge import Judge, VerdictCache
+
+    cache = VerdictCache(tmp_path / "v.json")
+    client = StubJudgeClient()
+    judge = Judge(client=client, cache=cache)
+    judge.assess("risk_commentary", "answer one")
+    judge.assess("risk_commentary", "answer two")
+    assert client.calls == 2
+
+
+def test_the_judge_reports_its_own_model_not_the_agent_s(tmp_path):
+    from evals.judge import Judge, VerdictCache
+
+    client = StubJudgeClient()
+    judge = Judge(client=client, cache=VerdictCache(tmp_path / "v.json"))
+    assert judge.identity is not None
+    assert judge.identity.model == "judge"
+
+
+def test_a_run_records_the_judge_model_separately(built_db, recorded_suite, tmp_path):
+    """They may differ, and the report must be able to state both."""
+    from evals.judge import Judge, VerdictCache
+
+    scenarios, transcripts = recorded_suite
+    judge = Judge(client=StubJudgeClient(), cache=VerdictCache(tmp_path / "v.json"))
+    run, _ = run_suite(
+        scenarios, Path(built_db), transcripts=transcripts, judge=judge
+    )
+    assert run.metadata.model.provider == "stub"
+    assert run.metadata.model.model == "scripted"
+    assert run.metadata.judge_model.model == "judge"
+    assert run.metadata.model.label() != run.metadata.judge_model.label()
+
+
+def test_the_report_states_both_models(built_db, recorded_suite, tmp_path):
+    from evals.judge import Judge, VerdictCache
+
+    scenarios, transcripts = recorded_suite
+    judge = Judge(client=StubJudgeClient(), cache=VerdictCache(tmp_path / "v.json"))
+    run, _ = run_suite(
+        scenarios, Path(built_db), transcripts=transcripts, judge=judge
+    )
+    text = render_report(run)
+    assert "Agent (under test)" in text
+    assert "Judge (instrument)" in text
+    assert run.metadata.model.label() in text
+    assert run.metadata.judge_model.label() in text
+
+
+def test_the_report_warns_when_agent_and_judge_are_the_same_model(
+    built_db, recorded_suite, tmp_path
+):
+    from evals.judge import Judge, VerdictCache
+    from src.agent.providers import ModelIdentity
+
+    scenarios, transcripts = recorded_suite
+    client = StubJudgeClient()
+    client.identity = ModelIdentity(
+        provider="stub", model="scripted", version="1",
+        temperature=0.0, seed=1, max_tokens=1024,
+    )
+    judge = Judge(client=client, cache=VerdictCache(tmp_path / "v.json"))
+    run, _ = run_suite(
+        scenarios, Path(built_db), transcripts=transcripts, judge=judge
+    )
+    assert "same model" in render_report(run)
+
+
+@pytest.mark.parametrize("holds", [True, False])
+def test_a_judged_assertion_now_follows_the_judge_not_a_blanket_fail(
+    built_db, recorded_suite, tmp_path, holds
+):
+    """The point of wiring it: before, an unconfigured judge recorded every
+    free-text assertion as unsatisfied, so no scenario carrying one could pass
+    whatever the answer said. Now the verdict decides -- in both directions.
+
+    The two scenarios here carry `risk_commentary` in `must_not_contain`, so a
+    judge saying "yes, there is risk commentary" must fail the assertion and a
+    judge saying "no" must satisfy it. Getting that inversion wrong would make
+    every must_not_contain assertion backwards.
+    """
+    from evals.judge import Judge, VerdictCache
+
+    scenarios, transcripts = recorded_suite
+    client = StubJudgeClient(
+        json.dumps({"holds": holds, "confidence": 0.9, "reason": "x"})
+    )
+    judge = Judge(client=client, cache=VerdictCache(tmp_path / "v.json"))
+    run, _ = run_suite(
+        scenarios, Path(built_db), transcripts=transcripts, judge=judge
+    )
+    judged = [a for r in run.results for a in r.assertions if a.method == "judge"]
+    assert judged, "these scenarios do carry free-text assertions"
+    assert all(a.judge_confidence == 0.9 for a in judged)
+    # Every judged assertion here is a must_not_contain, so satisfied == not holds.
+    assert all(a.satisfied is (not holds) for a in judged)
+
+
 def test_calibration_flags_an_inadequate_rubric():
     agreement = calibrate([True] * 9 + [False], [True] * 10, "1.0.0")
     assert agreement.adequate is False
@@ -387,8 +878,19 @@ def test_calibration_flags_an_inadequate_rubric():
 
 
 def test_judge_prompt_is_a_versioned_file():
+    """The version is parsed, not hardcoded here: pinning it would mean every
+    rubric revision breaks a test that has nothing to do with the revision."""
     assert "Version:" in load_prompt()
-    assert prompt_version() == "1.0.0"
+    assert re.fullmatch(r"\d+\.\d+\.\d+", prompt_version())
+
+
+def test_the_rubric_records_why_it_changed():
+    """Section 3 requires the before and after of a revision to be reported."""
+    text = load_prompt()
+    if prompt_version() == "1.0.0":
+        pytest.skip("no revision yet")
+    assert "## Changelog" in text
+    assert prompt_version() in text.split("## Changelog", 1)[1]
 
 
 def test_an_unparseable_judge_reply_fails_the_assertion():
@@ -672,6 +1174,108 @@ def test_one_failing_scenario_does_not_cost_the_rest_of_the_sweep(built_db, tmp_
     assert "provider exploded" in summary["failed"][0]["error"]
 
 
+def test_an_injected_failure_actually_reaches_the_agent(built_db, tmp_path):
+    """Guards the guard. A `tool_failure` scenario whose injection never fires
+    is asking what the agent says when a tool breaks, and being shown a tool
+    that worked -- which is exactly what happened until the loop stopped binding
+    `dispatch` at import time.
+    """
+    from evals.record import record_scenario
+
+    scenario = next(
+        s for s in load_scenarios(SCENARIOS) if s.injected_failure is not None
+    )
+
+    class SeesTheResult:
+        """Calls the failing tool, then reports what it was handed."""
+
+        def __init__(self, scenario, seed):
+            from src.agent.providers import ModelIdentity
+
+            self.scenario = scenario
+            self.turn = 0
+            self.seen = ""
+            self.last_exchange = {"tokens_in": 1, "tokens_out": 1}
+            self.identity = ModelIdentity(
+                provider="stub", model="scripted", version="1",
+                temperature=0.0, seed=seed, max_tokens=64,
+            )
+
+        def complete(self, messages, tools):
+            from src.agent.loop import LLMResponse, ToolCall
+
+            self.turn += 1
+            if self.turn == 1:
+                return LLMResponse(
+                    tool_calls=(
+                        ToolCall(
+                            self.scenario.injected_failure.tool,
+                            {
+                                "machine_id": 1,
+                                "as_of": self.scenario.as_of.isoformat(),
+                            },
+                        ),
+                    )
+                )
+            self.seen = messages[-1]["content"]
+            return LLMResponse(text="done")
+
+    adapters = []
+
+    def factory(config, scenario, seed):
+        adapter = SeesTheResult(scenario, seed)
+        adapters.append(adapter)
+        return adapter
+
+    record_scenario(
+        scenario, 1, None, Path(built_db), tmp_path, client_factory=factory
+    )
+    seen = adapters[0].seen
+    assert '"status":"error"' in seen or '"status": "error"' in seen, (
+        f"the agent must be shown the injected error, got: {seen[:200]}"
+    )
+    assert scenario.injected_failure.code in seen
+
+
+def test_the_window_guard_reaches_the_agent_too(built_db, tmp_path):
+    """The same import-binding defect disabled the validation-window guard."""
+    from evals.record import record_scenario
+
+    scenario = next(s for s in load_scenarios(SCENARIOS) if s.as_of is not None)
+
+    class AsksForTheTestSplit:
+        def __init__(self, scenario, seed):
+            from src.agent.providers import ModelIdentity
+
+            self.turn = 0
+            self.last_exchange = {"tokens_in": 1, "tokens_out": 1}
+            self.identity = ModelIdentity(
+                provider="stub", model="scripted", version="1",
+                temperature=0.0, seed=seed, max_tokens=64,
+            )
+
+        def complete(self, messages, tools):
+            from src.agent.loop import LLMResponse, ToolCall
+
+            self.turn += 1
+            if self.turn == 1:
+                return LLMResponse(
+                    tool_calls=(
+                        ToolCall(
+                            "get_failure_risk",
+                            {"machine_id": 1, "as_of": "2015-12-01T00:00:00"},
+                        ),
+                    )
+                )
+            return LLMResponse(text="done")
+
+    with pytest.raises(ValidationWindowError):
+        record_scenario(
+            scenario, 1, None, Path(built_db), tmp_path,
+            client_factory=lambda c, s, seed: AsksForTheTestSplit(s, seed),
+        )
+
+
 def test_a_recorded_transcript_carries_its_model_and_every_exchange(built_db, tmp_path):
     scenario = load_scenarios(SCENARIOS)[0]
     from evals.record import record_scenario
@@ -940,3 +1544,101 @@ def test_validator_rejects_a_tool_failure_scenario_without_an_injection():
 
 def test_required_distribution_sums_to_the_stated_minimum():
     assert sum(REQUIRED_DISTRIBUTION.values()) == MINIMUM_SCENARIOS == 41
+
+
+# ======================================================================
+# Hand labelling and kappa scoring
+# ======================================================================
+
+HAND_LABEL = REPO / "evals" / "HAND_LABEL.md"
+
+
+def test_the_label_sheet_carries_none_of_the_judge_s_verdicts():
+    """Blind labelling. Seeing the judge first makes the kappa a measure of
+    agreement with something already shown."""
+    from evals.judge import JUDGEMENTS_DIR
+
+    if not HAND_LABEL.exists():
+        pytest.skip("no hand-label sheet generated yet")
+    sheet = HAND_LABEL.read_text(encoding="utf-8")
+    body = sheet[sheet.index("## 1. `"):]  # after the quoted rubric
+
+    cache = json.loads(
+        (REPO / JUDGEMENTS_DIR / "1.0.0.json").read_text(encoding="utf-8")
+    )
+    for entry in cache["verdicts"].values():
+        reason = entry.get("reason", "")
+        if len(reason) > 40:
+            assert reason[:40] not in body, "a judge reason leaked into the sheet"
+
+
+def test_a_freshly_generated_sheet_is_blank(tmp_path):
+    """Generated into a scratch path, because the checked-in sheet is filled in
+    -- that is the point of it."""
+    from evals.make_hand_label import build, latest_run
+    from evals.score_labels import parse_sheet
+
+    results, traces = latest_run(REPO / "evals" / "results")
+    sheet = build(results, traces)
+    rows = parse_sheet(sheet)
+    assert rows, "the sheet should carry assertion rows"
+    assert all(v is None for _, _, v in rows), "a fresh sheet must be unfilled"
+
+
+def test_the_sheet_covers_exactly_the_judged_assertions_at_seed_one():
+    from evals.score_labels import latest_run, parse_sheet
+
+    if not HAND_LABEL.exists():
+        pytest.skip("no hand-label sheet generated yet")
+    results, _ = latest_run(REPO / "evals" / "results")
+    expected = {
+        (r["scenario_id"], a["assertion"])
+        for r in results["results"] if r["seed"] == 1
+        for a in r["assertions"] if a["method"] == "judge"
+    }
+    got = {(s, a) for s, a, _ in parse_sheet(HAND_LABEL.read_text(encoding="utf-8"))}
+    assert got == expected
+
+
+@pytest.mark.parametrize(
+    "cell, expected", [("yes", True), ("YES", True), ("no", False), ("N", False), ("", None)]
+)
+def test_verdict_cells_parse_the_forms_a_human_will_actually_write(cell, expected):
+    from evals.score_labels import parse_sheet
+
+    sheet = (
+        "## 1. `scn-1`\n\n"
+        "| Assertion | Does the answer satisfy it? (yes / no) |\n|---|---|\n"
+        f"| `risk_commentary` | {cell} |\n"
+    )
+    assert parse_sheet(sheet) == [("scn-1", "risk_commentary", expected)]
+
+
+def test_an_unreadable_verdict_is_refused_rather_than_guessed():
+    from evals.score_labels import LabelSheetError, parse_sheet
+
+    sheet = "## 1. `scn-1`\n\n|---|---|\n| `risk_commentary` | maybe |\n"
+    with pytest.raises(LabelSheetError, match="cannot read verdict"):
+        parse_sheet(sheet)
+
+
+def test_parsing_ignores_the_worked_example_inside_the_quoted_rubric():
+    """The rubric shows `{"holds": true, ...}`; it must not be read as a label."""
+    from evals.score_labels import parse_sheet
+
+    sheet = (
+        "# HAND_LABEL.md\n\n```markdown\n"
+        '| `not_a_real_row` | yes |\n```\n\n'
+        "## 1. `scn-1`\n\n| `risk_commentary` |  |\n"
+    )
+    assert [a for _, a, _ in parse_sheet(sheet)] == ["risk_commentary"]
+
+
+def test_kappa_scoring_agrees_with_itself_and_flags_the_floor():
+    """A sheet that matches the judge exactly gives kappa 1.0; one that inverts
+    every label gives -1.0 and fails the floor."""
+    from evals.metrics import cohens_kappa
+
+    judge = [True, True, False, False, True, False]
+    assert cohens_kappa(judge, list(judge)) == 1.0
+    assert cohens_kappa(judge, [not x for x in judge]) == -1.0

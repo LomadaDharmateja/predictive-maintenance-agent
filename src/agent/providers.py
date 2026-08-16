@@ -334,22 +334,62 @@ class AnthropicClient(_Adapter):
             sampling_note="" if self._sampling else SAMPLING_REMOVED_NOTE,
         )
 
+    #: Splits the system prompt at the prediction-time heading the agent loop
+    #: appends. Everything before it is stable across the whole suite and is
+    #: what the cache breakpoint is placed on.
+    STABLE_SYSTEM_SPLIT = "\n\n## Prediction time\n\n"
+
+    def _system_blocks(self, system: str) -> list[dict]:
+        stable, _, volatile = system.partition(self.STABLE_SYSTEM_SPLIT)
+        blocks = [
+            {
+                "type": "text",
+                "text": stable,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+        if volatile:
+            blocks.append(
+                {"type": "text", "text": self.STABLE_SYSTEM_SPLIT.strip() + "\n\n" + volatile}
+            )
+        return blocks
+
     def complete(self, messages: list[dict], tools: list[dict]) -> LLMResponse:
         system, rendered = to_anthropic(messages)
+        rendered_tools = [
+            {
+                "name": tool["name"],
+                "description": tool["description"],
+                "input_schema": inline_refs(tool["input_schema"]),
+            }
+            for tool in tools
+        ]
         payload: dict[str, Any] = {
             "model": self._config.model,
             "max_tokens": self._config.max_tokens,
-            "system": system,
             "messages": rendered,
-            "tools": [
-                {
-                    "name": tool["name"],
-                    "description": tool["description"],
-                    "input_schema": inline_refs(tool["input_schema"]),
-                }
-                for tool in tools
-            ],
         }
+        if rendered_tools:
+            # Prompt caching, breakpoint 1. Render order is tools -> system ->
+            # messages, so a breakpoint on the last tool caches the whole tool
+            # block -- which is byte-identical across every call in the suite,
+            # agent and scenario alike.
+            rendered_tools[-1] = {
+                **rendered_tools[-1],
+                "cache_control": {"type": "ephemeral"},
+            }
+            payload["tools"] = rendered_tools
+        if system:
+            # Omitted rather than sent empty: the judge asks a flat question
+            # with no system prompt, and an empty string is a rejected request.
+            #
+            # Breakpoint 2, on the *first* system block. `to_anthropic` splits
+            # the system prompt so the versioned file is its own block and the
+            # per-scenario prediction time is a second one after it. Caching
+            # only the first keeps the prefix identical across all 123 runs;
+            # putting the breakpoint after the `as_of` line would make every
+            # scenario a fresh cache write and save nothing across the suite.
+            payload["system"] = self._system_blocks(system)
         if self._sampling:
             payload["temperature"] = self._config.temperature
 
@@ -383,11 +423,17 @@ class AnthropicClient(_Adapter):
         text = "".join(
             block.text for block in response.content if block.type == "text"
         )
+        usage = response.usage
         self.last_exchange = {
             "request": {k: v for k, v in payload.items() if k != "tools"},
             "response": json.loads(response.model_dump_json()),
-            "tokens_in": response.usage.input_tokens,
-            "tokens_out": response.usage.output_tokens,
+            "tokens_in": usage.input_tokens,
+            "tokens_out": usage.output_tokens,
+            # Billed differently from `tokens_in`: reads at ~0.1x, writes at
+            # ~1.25x. Recorded separately so the cost column can price them
+            # separately instead of quietly charging a cache read at full rate.
+            "cache_read": getattr(usage, "cache_read_input_tokens", 0) or 0,
+            "cache_write": getattr(usage, "cache_creation_input_tokens", 0) or 0,
             "stop_reason": response.stop_reason,
         }
         if response.stop_reason == "refusal":

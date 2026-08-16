@@ -82,7 +82,13 @@ class RecordingClient:
 
         # The replayable shape: exactly what `ReplayClient` needs to hand the
         # loop back, and nothing else.
-        turn: dict = {"tokens_in": tokens_in, "tokens_out": tokens_out}
+        turn: dict = {
+            "tokens_in": tokens_in,
+            "tokens_out": tokens_out,
+            # Billed at ~0.1x (read) and ~1.25x (write), not at the input rate.
+            "cache_read": int(exchange.get("cache_read", 0)),
+            "cache_write": int(exchange.get("cache_write", 0)),
+        }
         if response.wants_tools:
             turn["tool_calls"] = [
                 {"name": call.name, "arguments": call.arguments}
@@ -145,7 +151,7 @@ def record_scenario(
     original = tools_module.dispatch
     tools_module.dispatch = window_guarded(_inject(scenario, database, original))
     try:
-        agent.run(scenario.question)
+        agent.run(scenario.question, as_of=scenario.as_of)
     finally:
         tools_module.dispatch = original
 

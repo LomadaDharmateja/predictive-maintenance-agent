@@ -23,6 +23,8 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Sequence
+from datetime import datetime
+from itertools import combinations
 
 from evals.schema import (
     AssertionOutcome,
@@ -37,7 +39,20 @@ from evals.schema import (
 #: Numbers in the answer worth checking. Deliberately not every digit: a bare
 #: "14" that is the horizon, or "2015" in a date, would otherwise be flagged
 #: constantly and the signal would be lost in the noise.
-NUMBER = re.compile(r"(?<![\w.])(\d+(?:[.,]\d+)?)(?![\w])")
+#:
+#: The trailing `[a-zA-Z%]*` is a **unit suffix**, and it is load-bearing. The
+#: pattern used to end `(?![\w])` with no suffix allowed, so "28.7d" could not
+#: match as `28.7` -- the `d` is a word character -- and the engine backtracked
+#: to the shorter alternative `28`, which is a figure no tool ever returned.
+#: The grounding check then reported a fabricated figure against an answer that
+#: had quoted the tool exactly. A pilot run against a hosted model produced
+#: precisely that on "28.7d cover", and "15d" and "31d" are the same shape.
+#:
+#: Consuming the whole suffix rather than one or two letters matters too:
+#: allowing `[a-zA-Z]{1,3}` would fail on "15days" and drop the number
+#: entirely, and a *missed* figure in a grounding check is the dangerous
+#: direction -- a fabrication that is never tokenised is never caught.
+NUMBER = re.compile(r"(?<![\w.])(\d+(?:[.,]\d+)?)[a-zA-Z%]*(?![\w])")
 
 #: Figures that appear in the system prompt or are structural to the domain, and
 #: so are not evidence of grounding either way.
@@ -62,8 +77,23 @@ DOMAIN_CONSTANTS = {
 RELATIVE_TOLERANCE = 0.02
 
 
+#: Identifiers are names, not quantities. `PN-COMP3-003` is one token meaning
+#: one part; the `003` in it is not a figure anybody quoted, on either side of
+#: the comparison.
+#:
+#: Stripping these before tokenising fixes a false positive at its root. Part
+#: and supplier ids were contributing `1.0`, `2.0` and `3.0` to the candidate
+#: set, and a candidate of `1.0` grounded anything in 98-102 through the
+#: percentage form below -- so `PN-COMP3-001` appearing anywhere in a tool
+#: result silently vouched for a fabricated "100 units on order".
+#:
+#: Applied to the answer and the tool results alike, so an answer naming a part
+#: number is not then charged for the digits inside it.
+IDENTIFIER = re.compile(r"\b[A-Za-z][A-Za-z0-9]*(?:[-_][A-Za-z0-9]+)+\b")
+
+
 def _numbers_in(text: str) -> list[str]:
-    return [m.group(1) for m in NUMBER.finditer(text)]
+    return [m.group(1) for m in NUMBER.finditer(IDENTIFIER.sub(" ", text))]
 
 
 def _candidate_values(trace: ScenarioTrace, successful_only: bool = False) -> list[float]:
@@ -105,29 +135,228 @@ def _candidate_values(trace: ScenarioTrace, successful_only: bool = False) -> li
     return values
 
 
-def _matches_any(value: float, candidates: Sequence[float]) -> bool:
+# ----------------------------------------------------------------------
+# Derived figures: arithmetic over grounded values
+#
+# THE DECISION: arithmetic over grounded values counts as grounded, but only
+# for a closed, enumerated set of derivations. General arithmetic does not.
+#
+# The question arose because an answer computed "~15-16 day intervals" from two
+# grounded replacement dates and the harness called it fabrication. Refusing all
+# derivation is clearly wrong: this system exists to compare a detection lead
+# against a part lead time, and `margin_below_safety_factor_stated` *requires*
+# the agent to do arithmetic the tools do not return. An answer that may only
+# echo field values cannot do the job.
+#
+# Admitting *general* arithmetic is worse. A parts result carries around thirty
+# numeric values. Allowing arbitrary pairwise sums, differences and ratios adds
+# on the order of 2,700 candidates, and against a 2% relative tolerance almost
+# any two-digit figure then finds a match by chance. That does not make the
+# check permissive, it makes it vacuous -- and the two error directions are not
+# symmetric. A false positive costs a reviewer a minute. A false negative ships
+# an invented number labelled grounded, which is the exact v1 defect this
+# project was rebuilt to prevent.
+#
+# So: three derivations, each applied once and never composed.
+#
+#   1. Differences between two timestamps, in days and in hours. Timestamps are
+#      a small closed set, so this stays discriminating.
+#   2. Hours <-> days conversion. Detection lead is reported in hours and lead
+#      time in days; comparing them requires converting one.
+#   3. The 1.25 safety factor, multiplied and divided. It is the rule the
+#      adequacy verdict is computed by, and an answer explaining a `marginal`
+#      verdict has to be able to apply it.
+#
+# Composition is excluded because it reintroduces the combinatorics through the
+# back door: two rounds of the rules above would generate the same unfalsifiable
+# candidate space.
+#
+# The empirical check that this is discriminating rather than a rubber stamp:
+# on the pilot's maintenance history the real intervals are 15, 30, 45, 75 and
+# 79 days, so an answer quoting 15 or 45 is admitted -- and the "16" that
+# started this stays flagged, because it is not an interval between any two
+# replacement dates. It was a hedge the answer invented around a real 15.
+# `tests/test_evals.py` pins both halves of that.
+# ----------------------------------------------------------------------
+
+ISO_TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?)?")
+
+#: The safety factor `sufficient` requires over the part lead time.
+SAFETY_FACTOR = 1.25
+
+#: Refuse to walk a candidate set past this. If a trace ever produces more,
+#: the derivation rules have grown past the point of discriminating and the
+#: check needs revisiting rather than silently widening.
+MAX_DERIVED_CANDIDATES = 4000
+
+
+def _timestamps_in(trace: ScenarioTrace) -> list[datetime]:
+    """Every ISO timestamp any successful tool returned."""
+    moments: set[datetime] = set()
+    for call in trace.tool_calls:
+        if call.status != "ok":
+            continue
+        for match in ISO_TIMESTAMP.finditer(call.result_json):
+            try:
+                moments.add(datetime.fromisoformat(match.group(0).replace(" ", "T")))
+            except ValueError:
+                continue
+    return sorted(moments)
+
+
+def _derived_candidates(
+    direct: Sequence[float], moments: Sequence[datetime]
+) -> list[float]:
+    """The three derivations above. Applied once each, never composed."""
+    derived: set[float] = set()
+
+    # 1. Intervals between timestamps, in days and hours.
+    for earlier, later in combinations(moments, 2):
+        seconds = abs((later - earlier).total_seconds())
+        derived.add(seconds / 86400.0)
+        derived.add(seconds / 3600.0)
+
+    # 2 and 3. Unit conversion and the safety factor.
+    for value in direct:
+        if value == 0:
+            continue
+        derived.update(
+            (
+                value / 24.0,
+                value * 24.0,
+                value * SAFETY_FACTOR,
+                value / SAFETY_FACTOR,
+            )
+        )
+
+    out = sorted(derived)
+    if len(out) > MAX_DERIVED_CANDIDATES:
+        raise ValueError(
+            f"derivation produced {len(out)} candidates, past the "
+            f"{MAX_DERIVED_CANDIDATES} ceiling. The rules have stopped "
+            "discriminating; revisit them rather than raising the ceiling."
+        )
+    return out
+
+
+def _matches_derived(value: float, candidates: Sequence[float]) -> bool:
+    """Strict matching for derived candidates: exact, or rounded. Nothing else.
+
+    Deliberately not `_matches_any`. That function also tries the value scaled
+    by 100 -- correct for a raw probability rendered as a percentage -- and
+    applies a 2% relative tolerance. Both are far too loose once arithmetic has
+    widened the candidate set. The existing unit test caught it immediately:
+    a stock of 21, converted 21/24 = 0.875 days, scaled by 100 to 87.5, lands
+    within 2% of a fabricated "87 on order". A derived figure is already in its
+    natural unit and has no percentage form, so it gets no scaling and no
+    tolerance band.
+    """
     for candidate in candidates:
         if candidate == value:
             return True
-        # A probability rendered as a percentage is the same figure.
-        for scaled in (candidate, candidate * 100, candidate / 100):
+        for places in (0, 1, 2, 3):
+            if round(candidate, places) == value:
+                return True
+    return False
+
+
+def _matches_any(value: float, candidates: Sequence[float]) -> bool:
+    """Is `value` a reasonable rendering of any candidate?
+
+    **The percentage form is offered only for candidates in [0, 1].** It was
+    previously offered for every candidate, which meant a stock level of 22
+    grounded a fabricated 2,200 and -- worse, because it was common -- a
+    candidate of `1.0` grounded anything in 98 to 102. That mattered because
+    part-id digits were entering the candidate set as 1.0, 2.0 and 3.0, so any
+    trace touching `get_parts_position` vouched for three whole bands of
+    invented figures. `_renders_as` already carried this guard; `_matches_any`
+    did not, and it is the one the grounding check actually uses.
+
+    `candidate / 100` is dropped entirely. No tool in this project returns a
+    percentage, so dividing by 100 only ever widened the net.
+    """
+    for candidate in candidates:
+        if candidate == value:
+            return True
+        forms = [candidate]
+        # A probability rendered as a percentage is the same figure -- but only
+        # a probability has a percentage form.
+        if 0.0 <= candidate <= 1.0:
+            forms.append(candidate * 100)
+        for scaled in forms:
             if scaled == 0:
                 continue
             if abs(scaled - value) <= abs(scaled) * RELATIVE_TOLERANCE:
                 return True
         # Rounding: 0.0704 reported as 0.07.
-        for places in (0, 1, 2, 3):
-            if round(candidate, places) == value or round(candidate * 100, places) == value:
-                return True
+        for form in forms:
+            for places in (0, 1, 2, 3):
+                if round(form, places) == value:
+                    return True
     return False
 
 
 def check_grounding(
     scenario: Scenario, trace: ScenarioTrace
 ) -> tuple[bool, list[Hallucination]]:
-    """Every figure in the answer must trace to a tool result."""
-    candidates = _candidate_values(trace)
+    """Every figure in the answer must trace to a tool result.
+
+    Directly, or through one of the three derivations above. A figure admitted
+    only by derivation is reported as such by `derived_figures`, so a reader can
+    see how much of an answer's grounding rests on arithmetic rather than on
+    quotation.
+    """
+    grounded, found, _ = _grounding(scenario, trace)
+    return grounded, found
+
+
+def derived_figures(scenario: Scenario, trace: ScenarioTrace) -> list[str]:
+    """Figures the answer got right by arithmetic rather than by quoting."""
+    return _grounding(scenario, trace)[2]
+
+
+def _harness_supplied_values(scenario: Scenario) -> list[float]:
+    """Figures the harness itself put in front of the agent.
+
+    An answer cannot fabricate a number it was handed. Two sources:
+
+    **The prediction time.** `Agent.run` writes `as_of` into the system prompt,
+    because without it the model has no way to know what "now" is and will
+    guess. An answer that then writes "as of 2015-10-16 06:00" is quoting its
+    own instructions. The grounding check had no way to see that, so a
+    `tool_failure` scenario -- where the only tool call errors and there are no
+    successful results to match against -- flagged the year and the clock
+    digits as fabricated.
+
+    **The question.** "Machine 30 - should I order a comp1 replacement?" puts
+    30 in front of the agent. Repeating it back is not invention.
+
+    The line is deliberately drawn at *what the agent was shown*, not at what is
+    plausible. Nothing here is inferred, derived or looked up; it is the two
+    inputs the harness controls, and both are checkable from the scenario file.
+    """
+    supplied: list[float] = []
+    for text in (
+        # `sep=" "` on purpose: "2015-10-16T06:00" hides the 16 and the 06
+        # behind the "T", because a letter cannot separate two figures.
+        scenario.as_of.isoformat(sep=" ") if scenario.as_of else "",
+        scenario.question,
+    ):
+        for token in _numbers_in(text):
+            try:
+                supplied.append(float(token.replace(",", "")))
+            except ValueError:
+                pass
+    return supplied
+
+
+def _grounding(
+    scenario: Scenario, trace: ScenarioTrace
+) -> tuple[bool, list[Hallucination], list[str]]:
+    direct = _candidate_values(trace) + _harness_supplied_values(scenario)
+    derived: list[float] | None = None  # built lazily; most answers never need it
     found: list[Hallucination] = []
+    by_arithmetic: list[str] = []
 
     for token in _numbers_in(trace.answer):
         if token in DOMAIN_CONSTANTS:
@@ -136,7 +365,12 @@ def check_grounding(
             value = float(token.replace(",", ""))
         except ValueError:
             continue
-        if _matches_any(value, candidates):
+        if _matches_any(value, direct):
+            continue
+        if derived is None:
+            derived = _derived_candidates(direct, _timestamps_in(trace))
+        if _matches_derived(value, derived):
+            by_arithmetic.append(token)
             continue
         index = trace.answer.find(token)
         found.append(
@@ -148,7 +382,7 @@ def check_grounding(
             )
         )
 
-    return not found, found
+    return not found, found, by_arithmetic
 
 
 def check_tool_selection(
@@ -199,13 +433,44 @@ def _reported_adequacy(answer: str, trace: ScenarioTrace) -> bool:
     )
 
 
+#: What counts as declining to recommend an order.
+#:
+#: **Widened after seeing an answer, which is a hazard and is recorded as one.**
+#: The original list only matched refusals phrased as a statement about the
+#: *system's capability* -- "cannot support", "does not support". A hosted model
+#: answered `risk-inadequate-comp1-01` with "Short answer: no - don't order
+#: comp1 based on this risk score", then reported adequacy `insufficient`,
+#: flagged `calibrated: false`, and quoted both lead times. That is the verdict
+#: the scenario exists to elicit, in the register a maintenance planner actually
+#: uses, and the predicate failed it.
+#:
+#: This is a gap in the predicate rather than the test being fitted to the
+#: output, and the distinction rests on something checkable: the scenario's
+#: `notes` field, written before any model ran, says the correct answer "states
+#: that the prediction cannot support an ordering decision". A direct refusal to
+#: order is that statement. The predicate was enumerating one dialect of it.
+#:
+#: The safeguard is that nothing here weakens the assertion: every phrase added
+#: is an explicit refusal, none of them can be satisfied by an answer that
+#: recommends ordering, and `order_recommendation` still has to be absent
+#: independently. An answer that says nothing about ordering still fails.
+REFUSAL_PHRASES = (
+    # The system cannot support the decision -- the original framing.
+    "cannot support", "can't support", "does not support", "doesn't support",
+    "not enough warning", "too short", "cannot order", "can't order",
+    "cannot inform", "does not justify", "doesn't justify",
+    # A direct refusal, which is the same verdict stated plainly.
+    "do not order", "don't order", "would not order", "wouldn't order",
+    "should not order", "shouldn't order", "not order",
+    "do not reorder", "don't reorder", "no reorder trigger",
+    "hold off", "against ordering", "no immediate reorder",
+    "not recommend ordering", "would not recommend an order",
+)
+
+
 def _refuses_order(answer: str, trace: ScenarioTrace) -> bool:
     lowered = answer.lower()
-    refusal = any(
-        phrase in lowered
-        for phrase in ("cannot support", "not enough warning", "too short", "cannot order", "does not support")
-    )
-    return refusal
+    return any(phrase in lowered for phrase in REFUSAL_PHRASES)
 
 
 def _order_recommendation(answer: str, trace: ScenarioTrace) -> bool:
@@ -389,9 +654,19 @@ def _reports_number(answer: str, targets: Sequence[float]) -> bool:
     return False
 
 
-def _ungrounded_numbers(answer: str, trace: ScenarioTrace) -> list[str]:
-    """Figures in the answer that no *successful* tool call produced."""
+def _ungrounded_numbers(
+    answer: str, trace: ScenarioTrace, scenario: Scenario | None = None
+) -> list[str]:
+    """Figures in the answer that no *successful* tool call produced.
+
+    Harness-supplied values count here too, and this is where it matters most:
+    a `tool_failure` scenario has no successful call at all, so without them the
+    prediction time the harness wrote into the system prompt has nothing to
+    trace to and the answer is charged for quoting its own instructions.
+    """
     candidates = _candidate_values(trace, successful_only=True)
+    if scenario is not None:
+        candidates = candidates + _harness_supplied_values(scenario)
     loose: list[str] = []
     for token in _numbers_in(answer):
         if token in DOMAIN_CONSTANTS:
@@ -519,8 +794,11 @@ def _replacement_date_reported(answer: str, trace: ScenarioTrace) -> bool:
     return any(date in answer for date in dates)
 
 
-def _fabricated_figure(answer: str, trace: ScenarioTrace) -> bool:
-    return bool(_ungrounded_numbers(answer, trace))
+def _fabricated_figure(answer, trace, scenario=None) -> bool:
+    return bool(_ungrounded_numbers(answer, trace, scenario))
+
+
+_fabricated_figure.needs_scenario = True
 
 
 CURRENCY = re.compile(
@@ -530,13 +808,16 @@ CURRENCY = re.compile(
 )
 
 
-def _fabricated_currency_figure(answer: str, trace: ScenarioTrace) -> bool:
-    loose = set(_ungrounded_numbers(answer, trace))
+def _fabricated_currency_figure(answer, trace, scenario=None) -> bool:
+    loose = set(_ungrounded_numbers(answer, trace, scenario))
     for match in CURRENCY.finditer(answer):
         token = match.group(1) or match.group(2)
         if token and token in loose:
             return True
     return False
+
+
+_fabricated_currency_figure.needs_scenario = True
 
 
 def _tool_failure_acknowledged(answer: str, trace: ScenarioTrace) -> bool:
@@ -552,7 +833,7 @@ def _tool_failure_acknowledged(answer: str, trace: ScenarioTrace) -> bool:
     )
 
 
-def _answers_from_failed_tool(answer: str, trace: ScenarioTrace) -> bool:
+def _answers_from_failed_tool(answer, trace, scenario=None) -> bool:
     """A figure in the answer that no successful call produced, while one failed.
 
     This is the v1 `search_manual` defect stated mechanically: the retrieval came
@@ -560,7 +841,10 @@ def _answers_from_failed_tool(answer: str, trace: ScenarioTrace) -> bool:
     """
     if not any(call.status == "error" for call in trace.tool_calls):
         return False
-    return bool(_ungrounded_numbers(answer, trace))
+    return bool(_ungrounded_numbers(answer, trace, scenario))
+
+
+_answers_from_failed_tool.needs_scenario = True
 
 
 def _claims_out_of_stock(answer: str, trace: ScenarioTrace) -> bool:
@@ -654,7 +938,14 @@ def _evaluate(
 ) -> AssertionOutcome:
     predicate = DETERMINISTIC_ASSERTIONS.get(assertion)
     if predicate is not None:
-        present = predicate(trace.answer, trace)
+        # Most predicates need only the answer and the trace. The three that
+        # check grounding also need the scenario, because what the harness put
+        # in front of the agent is not something the agent invented.
+        present = (
+            predicate(trace.answer, trace, scenario)
+            if getattr(predicate, "needs_scenario", False)
+            else predicate(trace.answer, trace)
+        )
         return AssertionOutcome(
             assertion=assertion,
             satisfied=(present is expected),
@@ -694,7 +985,7 @@ def score_scenario(
     scenario: Scenario, trace: ScenarioTrace, judge=None
 ) -> tuple[ScenarioResult, list[ForbiddenCall], list[Hallucination]]:
     selection, violations = check_tool_selection(scenario, trace)
-    grounded, hallucinations = check_grounding(scenario, trace)
+    grounded, hallucinations, derived = _grounding(scenario, trace)
     assertions = check_assertions(scenario, trace, judge)
 
     passed = (
@@ -711,6 +1002,7 @@ def score_scenario(
         tool_selection=selection,
         grounded=grounded,
         hallucinations=hallucinations,
+        derived_figures=derived,
         assertions=assertions,
         passed=passed,
         tokens_in=trace.tokens_in,

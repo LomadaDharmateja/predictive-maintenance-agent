@@ -128,6 +128,11 @@ class ScenarioTrace(Strict):
     messages_dropped: int
     tokens_in: int
     tokens_out: int
+    #: Prompt-cache tokens, kept apart from `tokens_in` because they are billed
+    #: at ~0.1x (read) and ~1.25x (write). Default 0 so transcripts recorded
+    #: before caching was enabled still parse.
+    cache_read: int = 0
+    cache_write: int = 0
     wall_clock_ms: float
     estimated_cost_usd: float
 
@@ -176,6 +181,10 @@ class ScenarioResult(Strict):
     tool_selection: ToolSelection
     grounded: bool
     hallucinations: list[Hallucination]
+    #: Figures the answer got right by arithmetic over grounded values rather
+    #: than by quoting one. Reported so a reader can see how much of an
+    #: answer's grounding rests on derivation; see `evals/metrics.py`.
+    derived_figures: list[str] = Field(default_factory=list)
     assertions: list[AssertionOutcome]
     passed: bool
     tokens_in: int
@@ -204,6 +213,12 @@ class RunMetadata(Strict):
     #: model cannot be compared to another one.
     model: ModelIdentity | None = None
 
+    #: Which model graded the free-text assertions. Recorded separately because
+    #: it is a different measurement: the agent's model is what is under test,
+    #: the judge's model is part of the instrument. Reporting one number for
+    #: both would let a change of instrument read as a change in the agent.
+    judge_model: ModelIdentity | None = None
+
 
 class RunResults(Strict):
     metadata: RunMetadata
@@ -211,6 +226,31 @@ class RunResults(Strict):
     forbidden_calls: list[ForbiddenCall]
     hallucinations: list[Hallucination]
     judge_agreement: "JudgeAgreement | None" = None
+
+
+class AssertionAgreement(Strict):
+    """Judge-human agreement for one assertion name.
+
+    `kappa` is None where it is undefined -- both raters constant, which happens
+    constantly at n=1. The disagreement count is the usable signal at this
+    sample size; the coefficient is not.
+    """
+
+    assertion: str
+    n: int
+    agreements: int
+    disagreements: int
+    kappa: float | None = None
+
+
+class VersionAgreement(Strict):
+    """One rubric version scored against the same fixed human labels."""
+
+    version: str
+    kappa: float
+    n_labelled: int
+    n_agreements: int
+    note: str = ""
 
 
 class JudgeAgreement(Strict):
@@ -226,6 +266,18 @@ class JudgeAgreement(Strict):
     judge_prompt_version: str
     adequate: bool
     note: str = ""
+
+    #: Per assertion name. Drives the validated / unvalidated split in the
+    #: report: a name with zero disagreements is validated *at this sample
+    #: size*, which for most of them is one or two rows.
+    per_type: list[AssertionAgreement] = Field(default_factory=list)
+
+    #: Every rubric version scored against the same fixed labels, so the
+    #: before and after section 3 requires is data rather than recollection.
+    history: list[VersionAgreement] = Field(default_factory=list)
+
+    #: What the figure is actually worth at this sample size.
+    precision_note: str = ""
 
 
 RunResults.model_rebuild()

@@ -61,15 +61,34 @@ DEFAULT_SEEDS = (1, 2, 3)
 #: which this harness did until transcripts carried a provider -- reports a
 #: cost that was never incurred, and the cost column exists to inform a
 #: decision about what a real run would cost.
+#: Keyed by model where the model is known, because a tier's prices differ by
+#: 5x and a run priced at the wrong tier answers the wrong budgeting question.
+#: Standard list prices; any introductory discount is deliberately not encoded,
+#: so the figure is the one that survives the promotion ending.
 PRICES_PER_1K = {
-    "ollama": (0.0, 0.0),
-    "anthropic": (0.005, 0.025),  # claude-opus-5 list price
+    "claude-opus-5": (0.005, 0.025),
+    "claude-opus-4-8": (0.005, 0.025),
+    "claude-sonnet-5": (0.003, 0.015),
+    "claude-sonnet-4-6": (0.003, 0.015),
+    "claude-haiku-4-5": (0.001, 0.005),
+}
+PROVIDER_PRICES_PER_1K = {
+    "ollama": (0.0, 0.0),  # zero because it is zero
 }
 DEFAULT_PRICE = (0.003, 0.015)
 
+#: What a cached input token costs relative to an uncached one.
+CACHE_READ_MULTIPLIER = 0.1
+CACHE_WRITE_MULTIPLIER = 1.25
 
-def price_for(provider: str) -> tuple[float, float]:
-    return PRICES_PER_1K.get(provider, DEFAULT_PRICE)
+
+def price_for(identity) -> tuple[float, float]:
+    if identity.provider in PROVIDER_PRICES_PER_1K:
+        return PROVIDER_PRICES_PER_1K[identity.provider]
+    for model, price in PRICES_PER_1K.items():
+        if identity.model.startswith(model):
+            return price
+    return DEFAULT_PRICE
 
 
 class ReplayClient:
@@ -87,6 +106,8 @@ class ReplayClient:
         self.index = 0
         self.tokens_in = 0
         self.tokens_out = 0
+        self.cache_read = 0
+        self.cache_write = 0
 
     def complete(self, messages, tools) -> LLMResponse:
         if self.index >= len(self.turns):
@@ -101,6 +122,8 @@ class ReplayClient:
         # the cost column is reproducible.
         self.tokens_in += int(turn.get("tokens_in", 0))
         self.tokens_out += int(turn.get("tokens_out", 0))
+        self.cache_read += int(turn.get("cache_read", 0))
+        self.cache_write += int(turn.get("cache_write", 0))
 
         if turn.get("tool_calls"):
             return LLMResponse(
@@ -183,7 +206,7 @@ def run_scenario(
     tools_module.dispatch = window_guarded(_inject(scenario, database))
     started = time.perf_counter()
     try:
-        outcome = agent.run(scenario.question)
+        outcome = agent.run(scenario.question, as_of=scenario.as_of)
     finally:
         tools_module.dispatch = original
     elapsed = (time.perf_counter() - started) * 1000
@@ -203,8 +226,17 @@ def run_scenario(
     ]
 
     identity = identity_of(transcript)
-    price_in, price_out = price_for(identity.provider)
-    cost = client.tokens_in / 1000 * price_in + client.tokens_out / 1000 * price_out
+    price_in, price_out = price_for(identity)
+    # Cached tokens are not `tokens_in` -- the provider reports them in their
+    # own fields and bills them at ~0.1x for a read and ~1.25x for a write.
+    # Charging them at the input rate would report a saving that was made as
+    # if it had not been.
+    cost = (
+        client.tokens_in / 1000 * price_in
+        + client.cache_read / 1000 * price_in * CACHE_READ_MULTIPLIER
+        + client.cache_write / 1000 * price_in * CACHE_WRITE_MULTIPLIER
+        + client.tokens_out / 1000 * price_out
+    )
     trace = ScenarioTrace(
         scenario_id=scenario.id,
         seed=seed,
@@ -215,6 +247,8 @@ def run_scenario(
         messages_dropped=outcome.messages_dropped,
         tokens_in=client.tokens_in,
         tokens_out=client.tokens_out,
+        cache_read=client.cache_read,
+        cache_write=client.cache_write,
         wall_clock_ms=round(elapsed, 2),
         estimated_cost_usd=round(cost, 6),
     )
@@ -262,6 +296,7 @@ def run_suite(
         n_scenarios=len(scenarios),
         harness_version=HARNESS_VERSION,
         model=next(iter(identities.values())) if identities else None,
+        judge_model=getattr(judge, "identity", None) if judge else None,
     )
     return (
         RunResults(
@@ -291,6 +326,60 @@ def write_traces(traces: list[ScenarioTrace], run_id: str, directory: Path = RES
     return path
 
 
+def build_judge(args):
+    """Assemble the judge from the CLI flags. Returns (judge, cache).
+
+    Offline by default: verdicts are replayed from
+    `evals/judgements/<rubric version>.json` and a miss raises. `--live-judge`
+    supplies a client so a miss is recorded instead.
+    """
+    if args.no_judge:
+        return None, None
+
+    from dataclasses import replace as _replace
+
+    from evals.judge import (
+        DEFAULT_PROMPT,
+        JUDGEMENTS_DIR,
+        Judge,
+        ProviderJudgeClient,
+        VerdictCache,
+        prompt_version,
+    )
+
+    version = prompt_version(DEFAULT_PROMPT)
+    cache = VerdictCache(JUDGEMENTS_DIR / f"{version}.json")
+
+    # Which judge model's verdicts to read. Offline this comes from
+    # --judge-model, because the cache holds verdicts per judge and replaying
+    # the wrong one would attribute Sonnet's grades to Haiku.
+    provider = args.judge_provider or args.provider
+    model_key = f"{provider}/{args.judge_model}" if args.judge_model else None
+
+    client = None
+    if args.live_judge:
+        from src.agent.loop import ModelConfig
+        from src.agent.providers import build_client as build_provider
+
+        provider = args.judge_provider or args.provider
+        config = ModelConfig(provider=provider)
+        if args.judge_model:
+            config = _replace(
+                config,
+                **(
+                    {"model": args.judge_model}
+                    if provider == "anthropic"
+                    else {"local_model": args.judge_model}
+                ),
+            )
+        client = ProviderJudgeClient(build_provider(config))
+        print(f"judge: live against {client.identity.label()}")
+    elif model_key:
+        print(f"judge: replaying recorded verdicts from {model_key}")
+
+    return Judge(client=client, cache=cache, model_key=model_key), cache
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scenarios", type=Path, default=SCENARIOS)
@@ -310,6 +399,22 @@ def main() -> None:
         help="with --live, re-record even scenarios that already have a transcript",
     )
     parser.add_argument("--throttle", type=float, default=0.0)
+    parser.add_argument(
+        "--live-judge",
+        action="store_true",
+        help="grade uncached free-text assertions against a live model and record "
+        "the verdicts; without it, an ungraded assertion raises",
+    )
+    parser.add_argument(
+        "--judge-provider", choices=("ollama", "anthropic"), default=None,
+        help="defaults to --provider",
+    )
+    parser.add_argument("--judge-model", default=None)
+    parser.add_argument(
+        "--no-judge",
+        action="store_true",
+        help="score without a judge; every free-text assertion records unsatisfied",
+    )
     args = parser.parse_args()
 
     scenarios = load_scenarios(args.scenarios)
@@ -354,13 +459,20 @@ def main() -> None:
                 + "\n  ".join(f"{e['key']}: {e['error']}" for e in summary["failed"])
             )
 
+    judge, cache = build_judge(args)
+
     print(f"{len(scenarios)} scenario(s), seeds {DEFAULT_SEEDS}")
     run, traces = run_suite(
         scenarios,
         args.database,
         transcripts=args.transcripts,
+        judge=judge,
         mode="live" if args.live else "recorded",
     )
+
+    if cache is not None:
+        path = cache.save(getattr(judge, "identity", None))
+        print(f"  judge: {cache.hits} cached verdict(s), {cache.misses} new -> {path}")
 
     results_path = write_results(run, args.results)
     traces_path = write_traces(traces, run.metadata.run_id, args.results)

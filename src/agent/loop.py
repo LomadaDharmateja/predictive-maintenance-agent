@@ -33,7 +33,8 @@ from pathlib import Path
 from typing import Protocol
 
 from src.agent.contracts import ErrorCode, ToolError
-from src.agent.tools import REGISTRY, dispatch, serialise
+from src.agent import tools as tools_module
+from src.agent.tools import REGISTRY, serialise
 
 PROMPT_PATH = Path(__file__).parent / "prompts" / "system_prompt.md"
 
@@ -197,13 +198,38 @@ class Agent:
         self.database = database
         self.system_prompt = load_system_prompt(prompt_path)
 
-    def run(self, question: str) -> AgentResult:
+    #: How the caller tells the agent what "now" is. Appended to the versioned
+    #: system prompt rather than written into it, because it is the one piece
+    #: of genuinely per-run context and the prompt file has to stay diffable.
+    AS_OF_TEMPLATE = (
+        "\n\n## Prediction time\n\n"
+        "The current time is {as_of}. Every tool that takes an `as_of` argument "
+        "must be given exactly this value. Do not substitute today's date, and "
+        "do not infer a time from the question: this system reasons about a "
+        "fixed historical point, and a different `as_of` answers a different "
+        "question.\n"
+    )
+
+    def run(self, question: str, as_of=None) -> AgentResult:
+        """Answer `question` as of `as_of`.
+
+        `as_of` is not optional in practice, only in signature. Without it the
+        model has no way to know what "now" is, and it will guess -- the pilot
+        run against a hosted model guessed `2025-01-01`, which is outside the
+        dataset entirely. The scenario always carried the prediction time; the
+        harness simply never passed it on.
+        """
         from src.agent import db as db_module
 
         database = self.database or db_module.DEFAULT_DB
         log = RunLog()
+        system = self.system_prompt
+        if as_of is not None:
+            system += self.AS_OF_TEMPLATE.format(
+                as_of=as_of.isoformat() if hasattr(as_of, "isoformat") else as_of
+            )
         messages: list[dict] = [
-            {"role": "system", "content": self.system_prompt},
+            {"role": "system", "content": system},
             {"role": "user", "content": question},
         ]
         dropped_total = 0
@@ -283,7 +309,13 @@ class Agent:
         attempts = 0
         while True:
             started = time.perf_counter()
-            result = dispatch(call.name, call.arguments, database)
+            # Resolved through the module on every call, never bound at import.
+            # A module-level `from ... import dispatch` captures the original
+            # function object, so anything that wraps `tools.dispatch` -- the
+            # eval harness's failure injection, and its validation-window guard
+            # -- is silently bypassed. Both were, until a pilot run showed a
+            # `tool_failure` scenario receiving a successful tool result.
+            result = tools_module.dispatch(call.name, call.arguments, database)
             elapsed = round((time.perf_counter() - started) * 1000, 2)
 
             if isinstance(result, ToolError):
