@@ -1,20 +1,45 @@
 # Predictive maintenance planning agent
 
-An LLM agent over a calibrated risk model, a maintenance history and a parts
-inventory, built on the Microsoft Azure predictive-maintenance dataset: 100
-machines, 876,100 hourly telemetry rows, plus error, maintenance and failure
-logs.
+An LLM agent that answers maintenance-planning questions over a 100-machine
+fleet. It works through six typed tools over a calibrated risk model, a
+maintenance history and a parts inventory, built on the Microsoft Azure
+predictive-maintenance dataset: 876,100 hourly telemetry rows plus error,
+maintenance and failure logs. The user is a maintenance planner deciding what
+deserves a technician's time in the next two weeks.
 
-**The most important result in this project is a negative one, so it goes
-first.**
+Questions it answers:
+
+- **Risk.** *"What's the comp2 position on machine 96 at the moment?"* — a
+  calibrated 14-day probability, with a confidence interval and an explicit
+  statement of whether that probability is trustworthy.
+- **Warning adequacy.** *"comp4 on machine 8 is showing high. The 12-day part is
+  the one I can actually get — does the warning give me enough time to use it?"*
+  — per component and per part, with the margin named.
+- **Parts position.** *"What is our stock position on comp3 parts, and how long
+  would it last?"* — from stock on hand and observed consumption.
+- **History and context.** *"When was comp3 last replaced on machine 14?"*,
+  *"How old is machine 14, and what model is it?"*
+- **Fleet triage.** *"Which machines should I be looking at this week?"* —
+  typed filters across the fleet, never model-written SQL.
+- **The questions it refuses.** *"What caused the comp2 problem on machine 39?"*
+  and *"Will machine 12 fail next March?"* get a plain statement that this
+  system cannot answer them, rather than an inference dressed as a retrieval.
+
+| It does | It does not |
+|---|---|
+| Flag which component on which machine is at elevated risk over 14 days, as a calibrated probability with a confidence interval | Say *when* inside that window, or how severe |
+| State whether its warning is long enough to act on, per component and per part | Recommend ordering a part on the strength of a prediction |
+| Report parts position from stock on hand and observed consumption | Derive a reorder decision from a risk score |
+| Say plainly when a probability is not trustworthy, or when a tool failed | Fill a gap with an inference presented as a retrieval |
 
 ---
 
-## The finding: the warning is shorter than the lead time
+## The scope decision: parts are managed from stock, not from predictions
 
-This system was built to predict a component failure and order the replacement
-part before it happened. **That cannot work on this data**, and the measurement
-that says so is the reason everything downstream is shaped the way it is.
+The system flags risk for scheduling attention, and manages parts from stock
+levels and consumption rates. Those are two separate paths that never meet.
+That is a deliberate design decision, and it rests on a measurement rather than
+on a preference.
 
 Two numbers have to be compared. The first is the model's **effective detection
 lead** — not how far ahead the label looks, but how long before the failure the
@@ -29,7 +54,8 @@ lead time** for the part you would order.
 | comp4 | 335.0 h | 14 of 15 | 288 h (12 d) |
 
 Supplier lead times across the nine stocked parts run **10 to 34 days, median
-23**. Crossing the two lists:
+23**. The model's reliable warning horizon is **14 days**. Crossing the two
+lists:
 
 > **1 of 9 parts can be ordered inside the warning the model gives.**
 > **0 of 9 clear it with the 1.25 safety factor applied.**
@@ -45,55 +71,92 @@ The lead-time requirement starts at 23 days. The two constraints do not
 intersect, and no horizon satisfies both. Derivation in
 [`docs/SIGNAL_ANALYSIS.md`](docs/SIGNAL_ANALYSIS.md) section 4.
 
-A documented impossibility is a legitimate engineering result. Manufacturing a
-horizon that satisfies neither constraint would not be.
+Shortening the horizon does not rescue it either. At a 24-hour horizon the model
+scores **test PR-AUC 1.000** on comp2 and comp3, with controls proving it is
+neither leakage nor memorisation — the simulator injects a matched error-code
+and sensor signature that fires before 100% of failures, and the pair is
+near-deterministic 24 hours out. That is a correct result and a useless one: a
+24-hour warning cannot inform a decision whose action takes three weeks to
+execute. The 24-hour evaluation is kept rather than deleted, in
+[`docs/EVALUATION_24h.md`](docs/EVALUATION_24h.md).
 
----
-
-## What this is, and what decision it serves
-
-> **Flag elevated component risk over a 14-day window so maintenance attention
-> can be scheduled, and manage parts from stock levels and consumption rates
-> rather than from predictions.**
-
-The user is a maintenance planner deciding what deserves a technician's time in
-the next two weeks. The system answers that question, and refuses the one it
-cannot answer.
-
-| It does | It does not |
-|---|---|
-| Flag which component on which machine is at elevated risk over 14 days, as a calibrated probability with a confidence interval | Say *when* inside that window, or how severe |
-| State whether its warning is long enough to act on, per component and per part | Recommend ordering a part on the strength of a prediction |
-| Report parts position from stock on hand and observed consumption | Derive a reorder decision from a risk score |
-| Say plainly when a probability is not trustworthy, or when a tool failed | Fill a gap with an inference presented as a retrieval |
-
-**The separation is enforced in the type system, not by convention.**
-`get_parts_position` accepts no risk score and has no import path to the model.
+So the parts path was built to need no prediction at all. **The separation is
+enforced in the type system, not by convention.** `get_parts_position` accepts
+no risk score and has no import path to the model.
 `tests/test_agent_parts_independence.py` asserts that by walking the import
 graph — so a future change that wires risk into parts reasoning fails the build
 rather than shipping.
 
-### Why the problem statement changed
-
-The original framing was predict-and-order. It was replaced after measurement,
-not after reflection. Milestone 3 scored **test PR-AUC 1.000** on comp2 and
-comp3 at a 24-hour horizon, with controls proving it was neither leakage nor
-memorisation — the simulator injects a matched error-code and sensor signature
-that fires before 100% of failures, and the pair is near-deterministic 24 hours
-out.
-
-That is a correct result and a useless one. A 24-hour warning cannot inform a
-decision whose action takes three weeks to execute. The horizon had been
-inherited from the standard framing of this dataset rather than derived from the
-decision the model serves, and everything built on it — calibration, thresholds,
-the cost curve — was vacuous as a consequence.
-
-The 24-hour work is kept, not deleted:
-[`docs/EVALUATION_24h.md`](docs/EVALUATION_24h.md).
-
 ---
 
-## Data, and what is wrong with it
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph offline["Offline — built once, deterministic"]
+        raw[("Azure PdM CSVs<br/>876,100 telemetry rows")]
+        db[("SQLite<br/>content-hashed")]
+        feat["38 features<br/>every window (t-W, t]"]
+        model["Logistic regression<br/>+ isotonic calibration"]
+        raw --> db --> feat --> model
+    end
+
+    subgraph tools["Tool layer — typed, read-only"]
+        risk["get_failure_risk<br/>calibrated probability<br/>+ warning_adequacy"]
+        parts["get_parts_position<br/>stock + consumption"]
+        hist["get_maintenance_history"]
+        errs["get_recent_errors"]
+        prof["get_machine_profile"]
+        find["find_machines<br/>typed filters, never SQL"]
+    end
+
+    subgraph agent["Agent loop"]
+        loop["bounded iterations<br/>bounded history<br/>Success[T] | ToolError"]
+        prov["LLMClient<br/>Anthropic | Ollama"]
+    end
+
+    subgraph obs["Observability"]
+        span["OpenTelemetry<br/>run → model → tool"]
+        acct["Run accounting<br/>tokens, cost, iterations"]
+    end
+
+    api["FastAPI<br/>/v1/ask  /v1/runs/{id}  /health"]
+
+    model --> risk
+    db --> risk & parts & hist & errs & prof & find
+    risk & parts & hist & errs & prof & find --> loop
+    loop <--> prov
+    loop --> span --> acct
+    loop --> api
+
+    evals["Eval harness<br/>41 scenarios × 3 seeds<br/>recorded transcripts"]
+    loop -.replayed offline.-> evals
+
+    style model fill:#e8dcc8,stroke:#8a5a2b
+    style risk fill:#e8dcc8,stroke:#8a5a2b
+    style parts fill:#d4e4d4,stroke:#1f7a4d
+```
+
+**`get_parts_position` has no edge from `model`.** That absence is the scope
+decision above drawn as a graph, and it is the one thing in this diagram a test
+enforces.
+
+Four design decisions worth naming:
+
+- **The agent loop is written, not adopted.** Explicit `max_iterations` with a
+  *defined* terminal behaviour, a trimmed transcript whose drops are recorded,
+  and typed failure branches — rather than a framework loop with unbounded
+  memory and no execution ceiling.
+- **The model never writes SQL.** `find_machines` takes a typed filter object and
+  builds a parameterised query internally. Connections open read-only with an
+  authorizer allowlist, verified by content hash after every test.
+- **Tool results are `Success[T] | ToolError`** — different types, not different
+  strings. A failed call cannot be presented as a successful one.
+- **Provider-agnostic.** One `LLMClient` protocol, an Anthropic adapter and a
+  local Ollama adapter. Data sovereignty is asked about before a pilot, not
+  after.
+
+### Data
 
 Microsoft's Azure predictive-maintenance sample. Five CSVs, fetched at build
 time and checksummed; none is committed.
@@ -145,75 +208,6 @@ Temporal, with a 14-day embargo derived from the label horizon in code.
 No random or shuffled split exists anywhere in `src/`. **The test split is opened
 once**, at the end of a milestone, behind a single-consumer token; nine tests
 guard that lock, including one that plants a reader to prove the guard fires.
-
----
-
-## Architecture
-
-```mermaid
-flowchart TB
-    subgraph offline["Offline — built once, deterministic"]
-        raw[("Azure PdM CSVs<br/>876,100 telemetry rows")]
-        db[("SQLite<br/>content-hashed")]
-        feat["38 features<br/>every window (t-W, t]"]
-        model["Logistic regression<br/>+ isotonic calibration"]
-        raw --> db --> feat --> model
-    end
-
-    subgraph tools["Tool layer — typed, read-only"]
-        risk["get_failure_risk<br/>calibrated probability<br/>+ warning_adequacy"]
-        parts["get_parts_position<br/>stock + consumption"]
-        hist["get_maintenance_history"]
-        errs["get_recent_errors"]
-        prof["get_machine_profile"]
-        find["find_machines<br/>typed filters, never SQL"]
-    end
-
-    subgraph agent["Agent loop — written, not adopted"]
-        loop["bounded iterations<br/>bounded history<br/>Success[T] | ToolError"]
-        prov["LLMClient<br/>Anthropic | Ollama"]
-    end
-
-    subgraph obs["Observability"]
-        span["OpenTelemetry<br/>run → model → tool"]
-        acct["Run accounting<br/>tokens, cost, iterations"]
-    end
-
-    api["FastAPI<br/>/v1/ask  /v1/runs/{id}  /health"]
-
-    model --> risk
-    db --> risk & parts & hist & errs & prof & find
-    risk & parts & hist & errs & prof & find --> loop
-    loop <--> prov
-    loop --> span --> acct
-    loop --> api
-
-    evals["Eval harness<br/>41 scenarios × 3 seeds<br/>recorded transcripts"]
-    loop -.replayed offline.-> evals
-
-    style model fill:#e8dcc8,stroke:#8a5a2b
-    style risk fill:#e8dcc8,stroke:#8a5a2b
-    style parts fill:#d4e4d4,stroke:#1f7a4d
-```
-
-**`get_parts_position` has no edge from `model`.** That absence is the Milestone
-3B conclusion drawn as a graph, and it is the one thing in this diagram a test
-enforces.
-
-Four design decisions worth naming:
-
-- **The agent loop is written, not adopted.** v1 used LangChain's `AgentExecutor`
-  with `ConversationBufferMemory` (unbounded) and `max_execution_time=None`. The
-  loop here has explicit `max_iterations` with a *defined* terminal behaviour, a
-  trimmed transcript whose drops are recorded, and typed failure branches.
-- **The model never writes SQL.** `find_machines` takes a typed filter object and
-  builds a parameterised query internally. Connections open read-only with an
-  authorizer allowlist, verified by content hash after every test.
-- **Tool results are `Success[T] | ToolError`** — different types, not different
-  strings. A failed call cannot be presented as a successful one.
-- **Provider-agnostic.** One `LLMClient` protocol, an Anthropic adapter and a
-  local Ollama adapter. Data sovereignty is asked about before a pilot, not
-  after.
 
 ---
 
@@ -271,8 +265,8 @@ failure-event level.
 | comp4 | 0.2481 | [0.1702, 0.3230] | 0.0961 | 0.0577 |
 
 Accuracy is never reported anywhere in this project: the positive rate is under
-1% at the horizon the model was originally framed for, and accuracy would read
-as 99% for a model that predicted nothing.
+1% at a 24-hour framing, and accuracy would read as 99% for a model that
+predicted nothing.
 
 **Logistic regression ships, not LightGBM.** The paired bootstrap on the PR-AUC
 difference spans zero on all four components, as does the paired difference in
@@ -398,20 +392,16 @@ Ranked by what would block a pilot first.
 
 | Document | Contents |
 |---|---|
+| [`docs/EXPLAINER.md`](docs/EXPLAINER.md) | How the system works, start to finish, in plain language |
 | [`docs/RESULTS_SUMMARY.md`](docs/RESULTS_SUMMARY.md) | Headline numbers with caveats — five-minute read |
-| [`docs/ENGINEERING_NOTES.md`](docs/ENGINEERING_NOTES.md) | What the v1 audit found, what was fixed, with the measurements |
 | [`docs/DATA.md`](docs/DATA.md) | Schema, leakage risks, the horizon decision |
 | [`docs/FEATURES.md`](docs/FEATURES.md) | The 38 features, the labels, the splits |
-| [`docs/SIGNAL_ANALYSIS.md`](docs/SIGNAL_ANALYSIS.md) | Fault-signature lead times, horizon sweep, the negative result |
+| [`docs/SIGNAL_ANALYSIS.md`](docs/SIGNAL_ANALYSIS.md) | Fault-signature lead times, horizon sweep, the horizon cap |
 | [`docs/EVALUATION.md`](docs/EVALUATION.md) | Baselines, metrics, calibration, thresholds, which model ships |
 | [`docs/EVALUATION_24h.md`](docs/EVALUATION_24h.md) | The archived 24-hour evaluation and why it was useless |
 | [`docs/AGENT_EVALUATION.md`](docs/AGENT_EVALUATION.md) | Agent results, judge calibration, the retraction |
 | [`docs/SECURITY.md`](docs/SECURITY.md) | The agent's exposure to untrusted input |
-| [`docs/leakage-case-study.md`](docs/leakage-case-study.md) | What v1 got wrong, recomputed from the archived code |
-
-An earlier version of this project (VULCAN) was audited, found to be built on
-three unrelated datasets, and replaced. It is in `archive/` and its audit is in
-`docs/v1/`. Nothing in either directory describes the current system.
+| [`docs/ENGINEERING_NOTES.md`](docs/ENGINEERING_NOTES.md) | Development history: the decisions behind the design, each with its measurement |
 
 ## Getting the data
 
