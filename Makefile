@@ -137,7 +137,7 @@ trace-replay:
 trace-view:
 	$(PYTHON) -m src.obs.viewer $(RUN) --accounting evals/results/$(RUN).accounting.json
 
-## case-study: reproduce the v1 leakage numbers from archive/v1-app/
+## case-study: reproduce the v1 leakage numbers (restore archive/v1-data/maintenance.csv from e4d9674 first)
 case-study:
 	$(PYTHON) scripts/leakage_case_study.py
 

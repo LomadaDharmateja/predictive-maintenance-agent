@@ -133,7 +133,7 @@ def render(source_stats: dict, naive: dict, honest: dict) -> str:
     add("`archive/v1-data/maintenance.csv`, following what")
     add("`archive/v1-app/tools/db_setup.py` and `archive/v1-app/tools/train_model.py`")
     add("actually did. Nothing is quoted from an earlier document. Reproduce with")
-    add("`make case-study`.")
+    add("`git checkout e4d9674 -- archive/v1-data/maintenance.csv`, then `make case-study`.")
     add("")
     add("---")
     add("")
@@ -300,7 +300,9 @@ def render(source_stats: dict, naive: dict, honest: dict) -> str:
     add("**true**, and that a project reporting the inflated one would have shipped a")
     add("model believing it caught almost everything while missing a third of it.")
     add("")
-    add("The AI4I data is retained under `archive/v1-data/` for this reason alone. It")
+    add("The AI4I data was kept for this reason alone, and has since been removed from")
+    add("the working tree. Restore it with")
+    add("`git checkout e4d9674 -- archive/v1-data/maintenance.csv`. It")
     add("is unsuitable for the current project -- 10,000 rows, 10,000 unique product")
     add("IDs, no machine entity and no time dimension, so no fleet and no temporal")
     add("split could exist on it.")
@@ -311,8 +313,8 @@ def render(source_stats: dict, naive: dict, honest: dict) -> str:
 def main() -> None:
     if not SOURCE_CSV.exists():
         raise SystemExit(
-            f"{SOURCE_CSV} not found. It is committed under archive/v1-data/; "
-            "check out the repository fully."
+            f"{SOURCE_CSV} not found. It was removed from the working tree; "
+            "restore it from history with: git checkout e4d9674 -- archive/v1-data/maintenance.csv"
         )
 
     source = pd.read_csv(SOURCE_CSV)

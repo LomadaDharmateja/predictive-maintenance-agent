@@ -381,7 +381,8 @@ them is a measurement.
 ## 7. Out of scope
 
 The following were part of an earlier version of this project and have been removed.
-They are retained under `archive/v1-data/` for reference only.
+They were kept under `archive/v1-data/` for reference, and have since been removed
+from the working tree; they remain in git history up to commit `e4d9674`.
 
 | Removed | Reason |
 |---|---|
@@ -392,12 +393,12 @@ They are retained under `archive/v1-data/` for reference only.
 
 The v1 application layer that consumed this data — the Streamlit UI, the LangChain
 agent, the Pinecone retrieval layer, the commodity and supplier tools, the LangGraph
-sketch, and the RandomForest pickle trained on the AI4I table — is retained under
-`archive/v1-app/` for the same reason. None of it is imported by anything in `src/`.
+sketch, and the RandomForest pickle trained on the AI4I table — was kept under
+`archive/v1-app/` for the same reason, and removed with it. None of it was imported by anything in `src/`.
 
-The AI4I data is kept because it is the subject of the data-leakage case study in
-`docs/leakage-case-study.md`, whose figures are recomputed from the archived code
-by `make case-study` rather than quoted.
+The AI4I data was kept because it is the subject of the data-leakage case study in
+`docs/leakage-case-study.md`, whose figures are recomputed by `make case-study`
+rather than quoted, after restoring the source CSV from commit `e4d9674`.
 
 ---
 

@@ -4,7 +4,7 @@ Every number here was recomputed by `scripts/leakage_case_study.py` from
 `archive/v1-data/maintenance.csv`, following what
 `archive/v1-app/tools/db_setup.py` and `archive/v1-app/tools/train_model.py`
 actually did. Nothing is quoted from an earlier document. Reproduce with
-`make case-study`.
+`git checkout e4d9674 -- archive/v1-data/maintenance.csv`, then `make case-study`.
 
 ---
 
@@ -121,7 +121,9 @@ is not that the honest number is impressive. It is that the honest number is
 **true**, and that a project reporting the inflated one would have shipped a
 model believing it caught almost everything while missing a third of it.
 
-The AI4I data is retained under `archive/v1-data/` for this reason alone. It
+The AI4I data was kept for this reason alone, and has since been removed from
+the working tree. Restore it with
+`git checkout e4d9674 -- archive/v1-data/maintenance.csv`. It
 is unsuitable for the current project -- 10,000 rows, 10,000 unique product
 IDs, no machine entity and no time dimension, so no fleet and no temporal
 split could exist on it.
