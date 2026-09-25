@@ -8,7 +8,7 @@ becomes a span.
 **Offline by default, and that is a design constraint rather than a default.**
 The tracer provider ships with no exporter at all unless one is configured, and
 the exporters provided here write to a local file or to memory. Nothing in this
-module opens a socket. CLAUDE.md's determinism rule -- "no clock, no network, no
+module opens a socket. CONTRIBUTING.md's determinism rule -- "no clock, no network, no
 environment in the pipeline" -- is about the modelling pipeline, but a tracing
 layer that phoned home would make `pytest` require network access, which the
 milestone forbids outright.

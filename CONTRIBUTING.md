@@ -1,6 +1,7 @@
-# CLAUDE.md
+# Contributing
 
-Project instructions loaded into every session. Keep this current.
+The rules this codebase is built under. Several are enforced by tests; the
+test that enforces each one is named where it exists.
 
 ## What this project is
 
@@ -10,10 +11,8 @@ and failure logs. An LLM agent answers maintenance-planning questions
 through typed tools over a calibrated risk model, maintenance history
 and a synthetic parts inventory.
 
-This is a rebuild. An earlier version (VULCAN) was audited, found to
-be built on three unrelated datasets, and replaced. That version is in
-`archive/` and its audit is in `docs/v1/`. Do not treat anything in
-`archive/` or `docs/v1/` as current.
+`docs/v1/` documents an earlier version of this project. It is history,
+not a description of the current system.
 
 ## Problem statement
 
@@ -24,20 +23,21 @@ consumption rates rather than from predictions.
 The second clause is a measured constraint, not a preference. No
 prediction horizon satisfies both model accuracy and the 23-day median
 parts lead time; one of nine parts can be ordered in time. See
-`docs/EVALUATION.md`.
+`docs/SIGNAL_ANALYSIS.md` section 4.
 
-## Read these before working
+## Read these before changing anything
 
 - `docs/DATA.md` — schema, leakage rules, cost assumption
 - `docs/FEATURES.md` — every feature and its window
 - `docs/EVALUATION.md` — model results and what they do not support
-- `docs/MILESTONE_*.md` — the spec for the milestone in progress
+- `docs/MILESTONE_*.md` — the spec for each milestone
 
 ## Standing rules
 
 **Temporal integrity.** No feature may use a record with
 `datetime > t`. Splits are temporal with an embargo derived from the
 label horizon. No random or shuffled splitting anywhere.
+Enforced by `tests/test_no_future_leakage.py`.
 
 **The test split is opened once**, at the end of a milestone, after
 every modelling decision is final. One module may load it. Choosing
@@ -63,17 +63,16 @@ No bare `except Exception` that returns a value.
 **Determinism.** Seed everything. Two clean builds produce identical
 content hashes. No clock, no network, no environment in the pipeline.
 
-## Working style
+**Credentials.** No credential value is ever printed, logged or
+committed. `.env` is gitignored; `.env.example` is the template.
 
-- Report what you measured, not what you expect. Mark anything
+## Reporting results
+
+- Report what was measured, not what was expected. Mark anything
   unverified as `UNVERIFIED:`.
-- If a spec I wrote is wrong, say so and say why rather than
-  implementing it.
 - Negative results are results. Report them plainly.
-- Stop at the stated milestone boundary. Do not proceed to the next.
-- Do not print or copy any credential value.
 
 ## Environment
 
-Windows, PowerShell, venv at `venv/`. `make` is not installed —
-run recipe steps directly.
+Developed on Windows with PowerShell and a venv at `venv/`. `make` is
+optional: every Makefile recipe is a one-liner that can be run directly.

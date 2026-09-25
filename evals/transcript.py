@@ -16,7 +16,7 @@ against a scenario that had been rewritten to machine 30 at
 for answering a different question.
 
 **2. No prediction time may fall outside the validation window.** The same
-defect read the *test* split, which CLAUDE.md's standing rule opens once, at
+defect read the *test* split, which CONTRIBUTING.md's standing rule opens once, at
 the end of a milestone, after every modelling decision is final. An evaluation
 harness is not a modelling decision and has no business there. The guard is
 mechanical because the rule cannot rely on nobody making that mistake twice.

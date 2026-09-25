@@ -217,7 +217,7 @@ def record_suite(
                     scenario, seed, config, database, directory, client_factory
                 )
             except Exception as exc:  # noqa: BLE001
-                # Deliberately broad, and deliberately not silent. CLAUDE.md
+                # Deliberately broad, and deliberately not silent. CONTRIBUTING.md
                 # forbids a bare `except Exception` that *returns a value*;
                 # this one returns nothing and hides nothing. The failure is
                 # named, counted, printed, and carried in the summary --

@@ -140,7 +140,7 @@ latency tables will assume the agent was evaluated. It was not.
 
 **3. The last commit message overstates what the commit contains.** `115c9f5`
 is titled *"Milestone 5: harness machinery, calibration gate, worksheet"* and
-contains exactly two files: `CLAUDE.md` and `docs/HOW_TO_WRITE_SCENARIOS.md`.
+contains exactly two files: `CLAUDE.md` (since renamed `CONTRIBUTING.md`) and `docs/HOW_TO_WRITE_SCENARIOS.md`.
 The harness machinery landed in `fa1bfa4`.
 
 **4. 1,776 lines of work are uncommitted, and one document is untracked.**
@@ -170,8 +170,8 @@ library. The `--live` flag raises by design. The model id is also superseded.
 no such Makefile target.** The nearest targets are `eval`, `eval-report`,
 `eval-diff` and `eval-validate`.
 
-**8. The Makefile targets fail when run directly, which is how `CLAUDE.md` says
-to run them.** `CLAUDE.md` states `make` is not installed and recipe steps
+**8. The Makefile targets fail when run directly, which is how `CONTRIBUTING.md` says
+to run them.** `CONTRIBUTING.md` states `make` is not installed and recipe steps
 should be run by hand. `python evals/validate_scenarios.py` then fails with
 `ModuleNotFoundError: No module named 'evals'`, because the `export PYTHONPATH
 := .` that makes it work lives in the Makefile. It needs `PYTHONPATH=.` in
@@ -190,7 +190,7 @@ system that no longer exists.
 **11. Repository debris.** `logs/factory_brain.log` is a v1 artefact still in
 the tree. `archive/` is 54 MB.
 
-**12. `UNVERIFIED:`** CLAUDE.md's determinism rule ("two clean builds produce
+**12. `UNVERIFIED:`** CONTRIBUTING.md's determinism rule ("two clean builds produce
 identical content hashes") is asserted by tests but I did not perform a clean
 rebuild this session. The claim rests on the test, not on a demonstration I
 watched.
