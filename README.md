@@ -36,62 +36,22 @@ Questions it answers:
 | Report parts position from stock on hand and observed consumption | Derive a reorder decision from a risk score |
 | Say plainly when a probability is not trustworthy, or when a tool failed | Fill a gap with an inference presented as a retrieval |
 
----
+**At a glance**
 
-## The scope decision: parts are managed from stock, not from predictions
-
-The system flags risk for scheduling attention, and manages parts from stock
-levels and consumption rates. Those are two separate paths that never meet.
-That is a deliberate design decision, and it rests on a measurement rather than
-on a preference.
-
-Two numbers have to be compared. The first is the model's **effective detection
-lead** — not how far ahead the label looks, but how long before the failure the
-score actually crosses its operating threshold. The second is the **supplier
-lead time** for the part you would order.
-
-| Component | Detection lead (median) | Events detected | Shortest part lead time |
-|---|---:|---:|---:|
-| comp1 | **24.0 h** | 5 of 9 | 240 h (10 d) |
-| comp2 | 335.0 h | 27 of 27 | 768 h (32 d) |
-| comp3 | 326.5 h | 8 of 8 | 360 h (15 d) |
-| comp4 | 335.0 h | 14 of 15 | 288 h (12 d) |
-
-Supplier lead times across the nine stocked parts run **10 to 34 days, median
-23**. The model's reliable warning horizon is **14 days**. Crossing the two
-lists:
-
-> **1 of 9 parts can be ordered inside the warning the model gives.**
-> **0 of 9 clear it with the 1.25 safety factor applied.**
-
-The one that fits — `PN-COMP4-001`, 335 h of warning against a 288 h lead time —
-clears the lead time and fails the safety factor. Its verdict is `marginal`, not
-`sufficient`. There is no `sufficient` pair in the inventory.
-
-**Extending the horizon does not rescue it.** Predictability caps the horizon at
-14 days: past that, the model's bootstrap interval overlaps a matched-error-code
-baseline's and it is no longer established as better than a spreadsheet rule.
-The lead-time requirement starts at 23 days. The two constraints do not
-intersect, and no horizon satisfies both. Derivation in
-[`docs/SIGNAL_ANALYSIS.md`](docs/SIGNAL_ANALYSIS.md) section 4.
-
-Shortening the horizon does not rescue it either. At a 24-hour horizon the model
-scores **test PR-AUC 1.000** on comp2 and comp3, with controls proving it is
-neither leakage nor memorisation — the simulator injects a matched error-code
-and sensor signature that fires before 100% of failures, and the pair is
-near-deterministic 24 hours out. That is a correct result and a useless one: a
-24-hour warning cannot inform a decision whose action takes three weeks to
-execute. The 24-hour evaluation is kept rather than deleted, in
-[`docs/EVALUATION_24h.md`](docs/EVALUATION_24h.md).
-
-So the parts path was built to need no prediction at all. **The separation is
-enforced in the type system, not by convention.** `get_parts_position` accepts
-no risk score and has no import path to the model.
-`tests/test_agent_parts_independence.py` asserts that by walking the import
-graph — so a future change that wires risk into parts reasoning fails the build
-rather than shipping.
-
----
+- Agent loop written from scratch: bounded iterations, typed tool results
+  (`Success[T] | ToolError`), six read-only tools, the model never writes SQL.
+- Risk model: calibrated logistic regression, test PR-AUC **0.19–0.38** across
+  four components against **0.06–0.14** for a matched-error-code baseline.
+- Agent evaluation: 41 scenarios × 3 seeds = 123 recorded runs for **$2.71**,
+  graded by deterministic checks plus an LLM judge whose agreement with human
+  labels was measured (κ = 0.602, below the 0.7 floor, and reported as such).
+- Observability: OpenTelemetry spans per run, model call and tool call;
+  deterministic offline replay that fails if a run diverges; per-run token and
+  cost accounting.
+- **563 tests**; CI runs the suite, gates on the executed count and replays
+  recorded runs.
+- FastAPI service in a non-root, read-only container; demo page that replays
+  recorded runs with no API key.
 
 ## The demo interface
 
@@ -99,9 +59,8 @@ A single page at `/`, served by the same FastAPI app. It defaults to **demo
 mode**: every answer replays a recorded transcript rather than calling a model,
 so the page needs no API key, costs nothing, and works with no network.
 
-```bash
-docker compose up --build      # then open http://localhost:8000/
-```
+It needs the database built from the dataset; see [Quickstart](#quickstart),
+step 3.
 
 Eight preset questions cover a lookup, a risk question whose warning is long
 enough to act on, one whose warning is not, a parts question, a fleet-level
@@ -142,8 +101,6 @@ provider.
 
 Screenshots are regenerated with `python -m scripts.capture_demo`, which needs
 a browser binary and is deliberately not part of the test suite.
-
----
 
 ## Architecture
 
@@ -268,47 +225,56 @@ No random or shuffled split exists anywhere in `src/`. **The test split is opene
 once**, at the end of a milestone, behind a single-consumer token; nine tests
 guard that lock, including one that plants a reader to prove the guard fires.
 
----
+## Quickstart
 
-## How to run it
+Python 3.12. Commands are shown for bash; on Windows PowerShell use
+`venv\Scripts\Activate.ps1` and `$env:PYTHONPATH="."`. `make` is optional:
+every Makefile target is one of the commands below.
 
-Windows/PowerShell was the development environment; `make` is not required —
-every recipe is a one-liner you can run directly.
+**1. Tests, from a clean clone (no data, no API key, no network).**
 
 ```bash
-# 1. Data (needs a Kaggle account; no credential is ever read by this repo)
-make fetch-data          # downloads and verifies every SHA-256
-make data                # build the SQLite database
-make features            # 38 features, 3 splits, content-hashed
-
-# 2. Model
-make train               # per-component, rolling-origin CV on train only
-make evaluate            # baselines, calibration, thresholds — validation only
-
-# 3. Agent evaluation (offline, free, deterministic)
-make eval                # replays recorded transcripts; no network
-make eval-report         # regenerates docs/AGENT_EVALUATION.md
-
-# 4. Re-record against a live model (costs money)
-make eval-record PROVIDER=ollama            # local, free
-make eval-record PROVIDER=anthropic THROTTLE=1
-
-# 5. Observability
-make trace-replay RUN=<run_id>   # replay offline; fails if it diverges
-make trace-view   RUN=<run_id>   # self-contained offline HTML trace
-
-# 6. Service and demo page
-cp .env.example .env             # fill in; .env is gitignored and never in an image
-docker compose up --build
-curl localhost:8000/health
-open http://localhost:8000/      # the demo page, replaying recorded runs
+python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+pytest
 ```
 
-**547 tests, no network required.** `pytest` runs everything; the tests that
-need the licensed download skip themselves, and CI asserts a floor on the
+563 tests are collected. On a clean clone **341 run and 222 skip**, because
+they need the licensed dataset; nothing fails. CI asserts a floor on the
 executed count so "everything skipped" cannot read as green.
 
----
+**2. Data and model (needs a free Kaggle account, see
+[Getting the data](#getting-the-data)).**
+
+```bash
+export PYTHONPATH=.
+python scripts/fetch_data.py --raw data/raw        # download, verify SHA-256
+python -m src.data.ingest --raw data/raw --db data/pdm.db \
+    --inventory data/generated/parts_inventory.csv \
+    --manifest data/generated/build_manifest.json   # build SQLite
+python -m src.features.build --db data/pdm.db --out data/generated \
+    --manifest data/generated/build_manifest.json   # 38 features, 3 splits
+python -m src.models.train                          # per-component models
+pytest                                              # the dataset tests now run too
+```
+
+**3. Demo page.** Replay mode runs the real agent loop and the real tools
+against the database built in step 2; only the model's replies come from
+recorded transcripts. So it needs the data, but no API key and no network.
+
+```bash
+python -m uvicorn src.api.app:app --port 8000       # open http://127.0.0.1:8000/
+# or, in a container:
+cp .env.example .env && docker compose up --build
+```
+
+Without step 2 the page loads, but every preset answers "the database is not
+readable".
+
+**Other targets:** `make eval` (replay the agent evaluation offline),
+`make eval-record PROVIDER=ollama|anthropic` (re-record against a live model),
+`make trace-replay RUN=<id>` and `make trace-view RUN=<id>` (replay and view a
+trace). See the `Makefile` for the full list.
 
 ## Results
 
@@ -370,7 +336,7 @@ components. The probability you can trust is not the one you can use.
 | risk_adequate_warning | 2/15 |
 | multi_step | 1/15 |
 | parts_position | 1/15 |
-| **Total** | **47/123** |
+| **Total** | **47/123** — strict grading; the judge is not calibrated, see below |
 
 **Zero forbidden tool calls across all 123 runs** — `get_failure_risk` was never
 called inside a parts question. The design separation held.
@@ -382,7 +348,61 @@ the judge is not calibrated (κ = 0.602 against a 0.7 floor), and of the 26
 **none** that the agent invented — they are arithmetic the grounding check
 deliberately excludes, plus two tokeniser defects.
 
----
+## Design decision: parts are planned from stock, not from predictions
+
+**Parts are planned from stock levels and consumption, not from risk scores,
+because the model's reliable warning (14 days) is shorter than supplier lead
+times (median 23 days).** This section shows the measurement behind that.
+
+The system flags risk for scheduling attention, and manages parts from stock
+levels and consumption rates. Those are two separate paths that never meet.
+
+Two numbers have to be compared. The first is the model's **effective detection
+lead** — not how far ahead the label looks, but how long before the failure the
+score actually crosses its operating threshold. The second is the **supplier
+lead time** for the part you would order.
+
+| Component | Detection lead (median) | Events detected | Shortest part lead time |
+|---|---:|---:|---:|
+| comp1 | **24.0 h** | 5 of 9 | 240 h (10 d) |
+| comp2 | 335.0 h | 27 of 27 | 768 h (32 d) |
+| comp3 | 326.5 h | 8 of 8 | 360 h (15 d) |
+| comp4 | 335.0 h | 14 of 15 | 288 h (12 d) |
+
+Supplier lead times across the nine stocked parts run **10 to 34 days, median
+23**. The model's reliable warning horizon is **14 days**. Crossing the two
+lists:
+
+> Only 1 of the 9 stocked parts can be ordered inside the warning the model
+> gives, and none clears the 1.25 safety factor. Ordering from predictions
+> would not work on this data, so the system does not do it.
+
+The one that fits — `PN-COMP4-001`, 335 h of warning against a 288 h lead time —
+clears the lead time and fails the safety factor. Its verdict is `marginal`, not
+`sufficient`. There is no `sufficient` pair in the inventory.
+
+**Extending the horizon does not rescue it.** Predictability caps the horizon at
+14 days: past that, the model's bootstrap interval overlaps a matched-error-code
+baseline's and it is no longer established as better than a spreadsheet rule.
+The lead-time requirement starts at 23 days. The two constraints do not
+intersect, and no horizon satisfies both. Derivation in
+[`docs/SIGNAL_ANALYSIS.md`](docs/SIGNAL_ANALYSIS.md) section 4.
+
+Shortening the horizon does not rescue it either. At a 24-hour horizon the model
+scores **test PR-AUC 1.000** on comp2 and comp3, with controls proving it is
+neither leakage nor memorisation — the simulator injects a matched error-code
+and sensor signature that fires before 100% of failures, and the pair is
+near-deterministic 24 hours out. That is a correct result and a useless one: a
+24-hour warning cannot inform a decision whose action takes three weeks to
+execute. The 24-hour evaluation is kept rather than deleted, in
+[`docs/EVALUATION_24h.md`](docs/EVALUATION_24h.md).
+
+So the parts path was built to need no prediction at all. **The separation is
+enforced in the type system, not by convention.** `get_parts_position` accepts
+no risk score and has no import path to the model.
+`tests/test_agent_parts_independence.py` asserts that by walking the import
+graph — so a future change that wires risk into parts reasoning fails the build
+rather than shipping.
 
 ## Known limitations and failure modes
 
@@ -421,8 +441,6 @@ replay what the model did on three specific runs.
 
 **Nothing here has touched real plant data or a real maintenance planner.**
 
----
-
 ## What production would need
 
 Ranked by what would block a pilot first.
@@ -445,8 +463,6 @@ Ranked by what would block a pilot first.
 6. **Cost controls at scale.** A 123-run evaluation costs $2.71, with prompt
    caching serving 75.5% of input tokens from cache and cutting input spend by
    67.8%. Production traffic needs budgets and per-tenant accounting.
-
----
 
 ## Where the detail lives
 
