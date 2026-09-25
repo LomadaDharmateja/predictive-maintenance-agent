@@ -244,7 +244,7 @@ they need the licensed dataset; nothing fails. CI asserts a floor on the
 executed count so "everything skipped" cannot read as green.
 
 **2. Data and model (needs a free Kaggle account, see
-[Getting the data](#getting-the-data)).**
+[Getting the data](#getting-the-data), or ask me for the files).**
 
 ```bash
 export PYTHONPATH=.
@@ -499,3 +499,8 @@ environment), never in this repository. Or download the archive by hand from
 [Kaggle](https://www.kaggle.com/datasets/arnabbiswas1/microsoft-azure-predictive-maintenance),
 unzip the five `PdM_*.csv` files into `data/raw/`, and run
 `make fetch-data-verify`.
+
+**No Kaggle account?** Contact me on
+[LinkedIn](https://www.linkedin.com/in/dharmateja-reddy-25983a2aa) or at
+dharmateja1923@gmail.com and I will send the five CSVs. Put them in `data/raw/`;
+`make fetch-data-verify` checks them against the same SHA-256 values.
